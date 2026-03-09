@@ -1,0 +1,93 @@
+[submodule "cloned-repositories2/cloned-repositories2/browser-use"]
+	path = cloned-repositories2/cloned-repositories2/browser-use
+	url = https://github.com/browser-use/browser-use
+[submodule "cloned-repositories2/cloned-repositories2/skyvern"]
+	path = cloned-repositories2/cloned-repositories2/skyvern
+	url = https://github.com/Skyvern-AI/skyvern
+[submodule "cloned-repositories2/cloned-repositories2/stagehand"]
+	path = cloned-repositories2/cloned-repositories2/stagehand
+	url = https://github.com/browserbase/stagehand
+[submodule "cloned-repositories2/cloned-repositories2/nanobrowser"]
+	path = cloned-repositories2/cloned-repositories2/nanobrowser
+	url = https://github.com/nanobrowser/nanobrowser
+[submodule "cloned-repositories2/cloned-repositories2/browserable"]
+	path = cloned-repositories2/cloned-repositories2/browserable
+	url = https://github.com/browserable/browserable
+[submodule "cloned-repositories2/cloned-repositories2/WebVoyager"]
+	path = cloned-repositories2/cloned-repositories2/WebVoyager
+	url = https://github.com/MinorJerry/WebVoyager
+[submodule "cloned-repositories2/cloned-repositories2/open-interpreter"]
+	path = cloned-repositories2/cloned-repositories2/open-interpreter
+	url = https://github.com/openinterpreter/open-interpreter
+[submodule "cloned-repositories2/cloned-repositories2/UI-TARS"]
+	path = cloned-repositories2/cloned-repositories2/UI-TARS
+	url = https://github.com/bytedance/UI-TARS
+[submodule "cloned-repositories2/cloned-repositories2/self-operating-computer"]
+	path = cloned-repositories2/cloned-repositories2/self-operating-computer
+	url = https://github.com/OthersideAI/self-operating-computer
+[submodule "cloned-repositories2/cloned-repositories2/WebAgent"]
+	path = cloned-repositories2/cloned-repositories2/WebAgent
+	url = https://github.com/Alibaba-NLP/WebAgent
+[submodule "cloned-repositories2/cloned-repositories2/OpenAgents"]
+	path = cloned-repositories2/cloned-repositories2/OpenAgents
+	url = https://github.com/xlang-ai/OpenAgents
+[submodule "cloned-repositories2/cloned-repositories2/OmniParser"]
+	path = cloned-repositories2/cloned-repositories2/OmniParser
+	url = https://github.com/microsoft/OmniParser
+[submodule "cloned-repositories2/cloned-repositories2/BrowserGym"]
+	path = cloned-repositories2/cloned-repositories2/BrowserGym
+	url = https://github.com/ServiceNow/BrowserGym
+[submodule "cloned-repositories2/cloned-repositories2/WebCanvas"]
+	path = cloned-repositories2/cloned-repositories2/WebCanvas
+	url = https://github.com/iMeanAI/WebCanvas
+[submodule "cloned-repositories2/cloned-repositories2/steel-browser"]
+	path = cloned-repositories2/cloned-repositories2/steel-browser
+	url = https://github.com/steel-dev/steel-browser
+[submodule "cloned-repositories2/cloned-repositories2/steel-cookbook"]
+	path = cloned-repositories2/cloned-repositories2/steel-cookbook
+	url = https://github.com/steel-dev/steel-cookbook
+[submodule "cloned-repositories2/cloned-repositories2/awesome-web-agents"]
+	path = cloned-repositories2/cloned-repositories2/awesome-web-agents
+	url = https://github.com/steel-dev/awesome-web-agents
+[submodule "cloned-repositories2/cloned-repositories2/surf.new"]
+	path = cloned-repositories2/cloned-repositories2/surf.new
+	url = https://github.com/steel-dev/surf.new
+[submodule "cloned-repositories2/cloned-repositories2/webarena"]
+	path = cloned-repositories2/cloned-repositories2/webarena
+	url = https://github.com/web-arena-x/webarena
+[submodule "cloned-repositories2/Browserable"]
+	path = cloned-repositories2/Browserable
+	url = https://github.com/browserable/browserable
+[submodule "cloned-repositories2/Browser-use"]
+	path = cloned-repositories2/Browser-use
+	url = https://github.com/browser-use/browser-use
+[submodule "cloned-repositories2/Stagehand"]
+	path = cloned-repositories2/Stagehand
+	url = https://github.com/browserbase/stagehand
+[submodule "cloned-repositories2/Nanobrowser"]
+	path = cloned-repositories2/Nanobrowser
+	url = https://github.com/nanobrowser/nanobrowser
+[submodule "cloned-repositories2/Open-Interpreter"]
+	path = cloned-repositories2/Open-Interpreter
+	url = https://github.com/openinterpreter/open-interpreter
+[submodule "cloned-repositories2/Self-Operating-Computer"]
+	path = cloned-repositories2/Self-Operating-Computer
+	url = https://github.com/OthersideAI/self-operating-computer
+[submodule "cloned-repositories2/Steel-Browser"]
+	path = cloned-repositories2/Steel-Browser
+	url = https://github.com/steel-dev/steel-browser
+[submodule "cloned-repositories2/Steel-Cookbook"]
+	path = cloned-repositories2/Steel-Cookbook
+	url = https://github.com/steel-dev/steel-cookbook
+[submodule "cloned-repositories2/Awesome-Web-Agents"]
+	path = cloned-repositories2/Awesome-Web-Agents
+	url = https://github.com/steel-dev/awesome-web-agents
+[submodule "cloned-repositories2/Surf.New"]
+	path = cloned-repositories2/Surf.New
+	url = https://github.com/steel-dev/surf.new
+[submodule "cloned-repositories2/Webarena"]
+	path = cloned-repositories2/Webarena
+	url = https://github.com/web-arena-x/webarena
+[submodule "cloned-repositories2/Skyvern"]
+	path = cloned-repositories2/Skyvern
+	url = https://github.com/Skyvern-AI/skyvern
