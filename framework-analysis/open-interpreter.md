@@ -1,120 +1,201 @@
-# Open Interpreter
+# Open Interpreter Research Report
 
-**Framework name:** Open Interpreter  
+## Executive Summary
+
+Open Interpreter is a **natural language interface for computers** — not a web-specific agent but a general-purpose code-executing agent. Users describe tasks in natural language; the LLM generates Python, JavaScript, or Shell code; the code executes locally; results feed back for the next iteration. Browser automation is one capability among many (alongside file manipulation, data analysis, API calls). It was one of the first open-source projects to demonstrate that LLMs could autonomously drive a computer.
+
+---
+
+## 1. Architecture Overview
+
+### Core Philosophy
+
+**Code-as-actions:** Instead of a predefined action space (click, type, scroll), Open Interpreter gives the LLM unlimited expressiveness — it can write any code to accomplish any goal. This generality comes at the cost of predictability and safety.
+
+**Local execution:** Everything runs on the user's machine. No cloud infrastructure required. Full internet access, no file size limits, no runtime restrictions — the exact opposite of hosted sandboxes.
+
+### Package Structure
+
+```
+open-interpreter/
+├── interpreter/
+│   ├── core/
+│   │   ├── core.py              # Main Interpreter class
+│   │   ├── computer/
+│   │   │   ├── computer.py      # Computer abstraction
+│   │   │   ├── terminal/        # Code execution environments
+│   │   │   │   ├── python.py    # Python runtime
+│   │   │   │   ├── javascript.py
+│   │   │   │   └── shell.py
+│   │   │   ├── browser/         # Browser control (Selenium)
+│   │   │   ├── files/           # File system operations
+│   │   │   ├── vision/          # Screenshot analysis
+│   │   │   └── display/         # GUI control
+│   │   └── utils/
+│   ├── terminal_interface/
+│   │   └── terminal_interface.py  # CLI chat interface
+│   └── __init__.py
+├── docs/
+└── pyproject.toml
+```
+
+---
+
+## 2. Core Components Deep Dive
+
+### 2.1 Interpreter Class (`interpreter/core/core.py`)
+
+```python
+from interpreter import interpreter
+
+# Basic chat
+interpreter.chat("Plot AAPL stock price vs META for the last year")
+# → LLM generates Python + matplotlib code
+# → Executes locally
+# → Shows chart
+
+# Single command
+interpreter.chat("Create a PDF report of top 5 news stories today")
+# → LLM writes web scraping + PDF generation code
+# → Executes
+
+# Programmatic use
+result = interpreter.chat("What files are in ~/Documents?", display=False)
+# Returns: [{"role": "assistant", "type": "message", "content": "..."}]
+```
+
+**Key configuration:**
+
+```python
+from interpreter import interpreter
+
+# LLM configuration (via LiteLLM)
+interpreter.llm.model = "gpt-4o"
+interpreter.llm.api_key = "sk-..."
+interpreter.llm.temperature = 0.0
+
+# Local model
+interpreter.offline = True
+interpreter.llm.model = "openai/x"
+interpreter.llm.api_base = "http://localhost:1234/v1"
+interpreter.llm.api_key = "fake_key"
+
+# Safety settings
+interpreter.auto_run = True   # Execute without confirmation
+interpreter.safe_mode = "auto"  # "off", "ask", "auto"
+
+# Vision
+interpreter.llm.supports_vision = True
+```
+
+### 2.2 Computer Object (`interpreter/core/computer/computer.py`)
+
+```python
+# The Computer class wraps all local capabilities
+
+computer = interpreter.computer
+
+# Code execution
+computer.run("python", "import pandas as pd; df = pd.read_csv('data.csv')")
+computer.run("javascript", "console.log(process.version)")
+computer.run("shell", "ls -la")
+
+# Browser (Selenium)
+computer.browser.search("open-source web agents")
+computer.browser.go_to("https://github.com/browser-use/browser-use")
+
+# Files
+computer.files.read("report.md")
+computer.files.write("output.txt", content)
+
+# Display/GUI
+computer.display.screenshot()
+computer.mouse.click(x, y)
+computer.keyboard.write("Hello World")
+```
+
+### 2.3 LiteLLM Integration
+
+Open Interpreter uses LiteLLM for universal model access:
+
+```python
+# 100+ models via unified interface
+interpreter.llm.model = "gpt-4o"           # OpenAI
+interpreter.llm.model = "claude-3-5-sonnet"  # Anthropic
+interpreter.llm.model = "gemini-2.5-pro"    # Google
+interpreter.llm.model = "ollama/llama3"     # Local via Ollama
+interpreter.llm.model = "azure/gpt-4o"     # Azure
+interpreter.llm.model = "bedrock/..."      # AWS
+```
+
+### 2.4 Execution Flow
+
+```
+User: "Go to github.com and find the most starred Python project this month"
+    ↓
+LLM generates code:
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    
+    driver = webdriver.Chrome()
+    driver.get("https://github.com/trending/python?since=monthly")
+    
+    first_repo = driver.find_element(By.CSS_SELECTOR, ".Box-row h2 a")
+    print(f"Top repo: {first_repo.text}")
+    print(f"URL: {first_repo.get_attribute('href')}")
+    driver.quit()
+    ↓
+Code executes locally
+    ↓
+Output: "Top repo: pytorch/pytorch  URL: https://github.com/pytorch/pytorch"
+    ↓
+LLM continues conversation with result
+```
+
+---
+
+## 3. Architecture Diagram
+
+```
+User (CLI / Python)
+    ↓
+Interpreter Class
+    ├─ Conversation manager
+    └─ LLM (via LiteLLM — 100+ models)
+        → Generates code (Python / JS / Shell)
+        ↓
+Computer Object
+    ├─ Terminal runners
+    │   ├─ Python runtime
+    │   ├─ JavaScript (Node.js)
+    │   └─ Shell/Bash
+    ├─ Browser (Selenium WebDriver)
+    ├─ Files (read/write)
+    ├─ Display (screenshot, mouse, keyboard)
+    └─ Vision (screenshot analysis)
+```
+
+---
+
+## 4. Key Technical Decisions
+
+**Why code generation instead of predefined actions?**
+Maximum expressiveness — any task is possible if the LLM can write code for it. No need to pre-define an action schema. The trade-off is unpredictability and security risk.
+
+**Why LiteLLM?**
+Supports 100+ models with a unified interface. Switching from GPT-4o to a local Ollama model is a single line change.
+
+---
+
+## 5. Limitations
+
+- **Security risk** — LLM-generated code executes locally with full permissions; could delete files, exfiltrate data
+- **Non-deterministic** — same prompt may generate different code on different runs
+- **Selenium-based browser** — dated compared to modern CDP/Playwright approaches
+- **Not a web-automation framework** — browser is one tool among many; purpose-built web agents outperform it on browser tasks
+
+**License:** AGPL-3.0  
+**Language:** Python 3.10-3.11  
 **Repository:** https://github.com/openinterpreter/open-interpreter  
-**Snapshot date:** 2026-03-18  
-
----
-
-## Architecture
-
-Open Interpreter is an **open-source natural language interface for computers** — not a web-only agent framework. It allows LLMs to execute code (Python, JavaScript, Shell, and more) locally on the user's machine, and includes browser control as one capability among many.
-
-The architecture is centred around a **code execution loop**:
-1. User provides a natural language instruction.
-2. LLM generates code (Python, JS, Shell, etc.) to fulfil the instruction.
-3. Open Interpreter executes the code in a local sandboxed environment.
-4. Output/errors are fed back to the LLM, which continues or corrects.
-5. Loop until the task is complete or the user intervenes.
-
-Key components:
-- **`interpreter` Python module** — the main interface, usable as a Python library or CLI (`interpreter` command).
-- **LiteLLM integration** — universal LLM provider abstraction supporting 100+ models.
-- **Code interpreter runtimes** — Python, JavaScript/Node, Bash, R, and more.
-- **Browser computer use** — the agent can launch and control browsers as part of multi-step tasks (via Selenium or Playwright, depending on version).
-- **GUI / vision mode** — optional vision capability for interpreting screenshots.
-- **Computer use protocol** — later versions support controlling the GUI (mouse, keyboard) beyond browser automation.
-
-Open Interpreter is positioned as a local, open-source alternative to OpenAI's Code Interpreter / ChatGPT Operator, running on the user's machine with full internet access and no runtime limits.
-
----
-
-## Perception type
-
-**Code-execution-centric + optional vision.** The primary perception modality is through code: the agent writes Python or JS to read files, query APIs, or manipulate browser DOM programmatically. Vision (screenshot analysis) is available as an optional module. Unlike other frameworks in this comparison, Open Interpreter does not have a specialised DOM serialisation or element-indexing layer — it accesses the web through code it writes itself.
-
----
-
-## LLM compatibility
-
-Virtually any LLM via **LiteLLM**:
-- OpenAI (GPT-4o, GPT-4-turbo, etc.)
-- Anthropic (Claude family)
-- Google (Gemini)
-- Local models via Ollama, LM Studio, or any OpenAI-compatible API
-- Azure OpenAI
-- AWS Bedrock
-- Hugging Face hosted models
-
-100k+ models via LiteLLM routing. Local mode available with offline operation.
-
----
-
-## Action interface
-
-The LLM generates executable code as its "action". There is no fixed set of browser actions — the agent writes whatever code it deems appropriate. For browser automation this typically means writing Selenium, Playwright, or `requests` code. In GUI control mode, the agent can also issue mouse and keyboard events.
-
----
-
-## Dependencies
-
-- Python 3.10 or 3.11
-- `litellm` (LLM routing)
-- Various optional runtimes: Node.js (JavaScript), R, etc.
-- Selenium or Playwright (for browser tasks, installed separately)
-- LLM provider API key (or local model server)
-
----
-
-## Browser control method
-
-**Code-generated automation** — Open Interpreter writes Python/Selenium/Playwright code to interact with the web, rather than providing a built-in browser automation layer. In computer-use mode, it can also control the GUI at the OS level (mouse, keyboard). There is no dedicated CDP integration or DOM serialisation pipeline.
-
----
-
-## Strengths
-
-- **Universal computer control** — not limited to web browsers; can run code, manipulate files, call APIs, control GUIs.
-- **Full internet access** — no restrictions on packages or network calls (unlike hosted sandboxes).
-- **Massive LLM compatibility** via LiteLLM (100+ models).
-- **Local privacy** — runs entirely on the user's machine; no data sent to a third-party automation server.
-- **Highly flexible** — the agent can write any code, making it adaptable to any task.
-- **50k+ GitHub stars** — one of the most popular open-source AI agents.
-- **Active community** with 100+ contributors.
-- **Local model support** — can run fully offline with Ollama.
-
----
-
-## Weaknesses
-
-- **Not a specialised web agent** — browser automation is one capability among many, not the primary focus. Purpose-built web agent frameworks (browser-use, Skyvern) will outperform it on web-specific benchmarks.
-- **No DOM distillation or element indexing** — the LLM must write its own element selection code, which can be brittle.
-- **Security risk** — executing LLM-generated code locally is inherently risky; code can delete files, exfiltrate data, etc.
-- **Inconsistency** — code generation is non-deterministic; the same prompt may produce different code on different runs, making reproducibility challenging.
-- **Requires user confirmation flow** for destructive actions (configurable), which adds friction.
-- **No built-in benchmarking** on web-specific tasks (WebVoyager, WebArena).
-
----
-
-## Typical use cases
-
-- General-purpose computer automation (not just web)
-- Data analysis and visualisation via code generation
-- File management, PDF creation, media processing
-- Multi-modal tasks combining web browsing with local computation
-- Power users wanting a local, open-source alternative to ChatGPT's code interpreter
-- Research into LLM code-generation capabilities and safety
-
----
-
-## Additional notes for thesis research
-
-**Classification note:** Open Interpreter is architecturally different from all other frameworks in this comparison. It is a *general-purpose computer agent* that happens to support browser automation, not a *web-first agent framework*. In your thesis taxonomy, it may belong in a separate category or serve as a reference point for the "general compute" end of the spectrum.
-
-**Reproducibility:** Because the agent generates code non-deterministically, exact step-by-step reproduction of a task execution is impossible without logging the generated code. This is a significant limitation for academic methodology sections.
-
-**Security angle:** The risk of LLM-generated code execution is a legitimate research concern — relevant if your thesis discusses safety and trust in agentic systems.
-
-**Comparison to browser-use:** Browser-use provides a structured action space (indexed DOM elements); Open Interpreter provides an unconstrained code generation interface. The trade-off is expressiveness vs. reliability — a key theme in the broader web agent literature.
-
-**Relevant context:** Open Interpreter was one of the first open-source projects to demonstrate that LLMs could autonomously drive a computer, predating most frameworks in this comparison. It has significant historical importance for the field.
+**GitHub stars:** ~60k  
+**Snapshot date:** 2026-03-18
