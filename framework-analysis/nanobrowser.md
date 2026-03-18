@@ -1,110 +1,243 @@
-# Nanobrowser
+# Nanobrowser Research Report
 
-**Framework name:** Nanobrowser  
+## Executive Summary
+
+Nanobrowser is an **open-source Chrome Extension** providing AI-powered web automation that runs entirely in the user's browser. It is architecturally distinct from all other frameworks: instead of CDP/Playwright, it uses Chrome Extension APIs to access the browser — making it invisible to anti-bot systems. A multi-agent system of three specialised roles (Planner, Navigator, Validator) coordinates to complete tasks, with all execution happening locally in the user's live browser session.
+
+---
+
+## 1. Architecture Overview
+
+### Core Philosophy
+
+**Extension-native automation:** By using Chrome Extension APIs instead of CDP WebSocket connections, Nanobrowser cannot be detected as automation. CDP creates detectable WebSocket connections and sets `navigator.webdriver = true`; Extension APIs appear identical to normal browser behaviour.
+
+**Privacy-first:** Everything runs locally. Credentials, cookies, and browsing data never leave the machine. No cloud account required.
+
+**Per-agent model assignment:** Each of the three agent roles (Planner, Navigator, Validator) can use a different LLM, allowing cost/performance optimisation.
+
+### Package Structure
+
+```
+nanobrowser/           (Chrome Extension, TypeScript)
+├── src/
+│   ├── agents/
+│   │   ├── planner.ts          # Planner Agent implementation
+│   │   ├── navigator.ts        # Navigator Agent implementation
+│   │   └── validator.ts        # Validator Agent implementation
+│   ├── background/
+│   │   └── service_worker.ts   # Extension background service worker
+│   ├── content/
+│   │   └── content_script.ts   # Injected into pages for DOM access
+│   ├── side_panel/
+│   │   ├── App.tsx              # React chat interface
+│   │   └── ChatHistory.tsx
+│   ├── storage/
+│   │   └── session_storage.ts  # LLM keys, settings
+│   └── manifest.json           # Chrome Extension manifest v3
+├── dist/                        # Built extension
+└── package.json
+```
+
+---
+
+## 2. Core Components Deep Dive
+
+### 2.1 Three-Agent System
+
+```typescript
+// Planner Agent — receives user goal, creates execution plan
+class PlannerAgent {
+    async plan(goal: string, pageContext: PageContext): Promise<Plan> {
+        // Uses configured Planner LLM (e.g., GPT-4o)
+        const response = await this.llm.chat([
+            { role: "system", content: PLANNER_SYSTEM_PROMPT },
+            { role: "user", content: `Goal: ${goal}\nPage: ${pageContext}` }
+        ]);
+        return parsePlan(response);
+    }
+}
+
+// Navigator Agent — executes individual steps on the page
+class NavigatorAgent {
+    async executeStep(step: PlanStep, page: ExtensionPage): Promise<StepResult> {
+        // Uses configured Navigator LLM (e.g., GPT-4o-mini for cost)
+        const action = await this.llm.decideAction(step, page.dom, page.screenshot);
+        return await this.executeBrowserAction(action);
+    }
+}
+
+// Validator Agent — verifies goal completion
+class ValidatorAgent {
+    async validate(goal: string, result: TaskResult): Promise<ValidationResult> {
+        // Checks if the goal was actually achieved
+        return await this.llm.validate(goal, result);
+    }
+}
+```
+
+### 2.2 Browser Access via Extension APIs
+
+```typescript
+// content_script.ts — runs in page context
+// Direct DOM access without CDP
+
+// Read DOM
+const pageContent = document.documentElement.innerHTML;
+const interactableElements = document.querySelectorAll(
+    'button, a, input, select, textarea, [onclick], [role="button"]'
+);
+
+// Simulate user interactions
+element.click();
+element.focus();
+element.value = "text to type";
+element.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+// background/service_worker.ts — extension service worker
+// Tab management
+chrome.tabs.executeScript(tabId, { code: '...' });
+chrome.tabs.sendMessage(tabId, { type: 'GET_DOM' });
+
+// Screenshot
+chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+    // screenshot available
+});
+```
+
+### 2.3 Side Panel Chat Interface
+
+```typescript
+// side_panel/App.tsx
+export function App() {
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isRunning, setIsRunning] = useState(false);
+    
+    const handleSubmit = async (goal: string) => {
+        setIsRunning(true);
+        // Send to background service worker
+        chrome.runtime.sendMessage({
+            type: 'RUN_TASK',
+            goal: goal,
+            config: getUserLLMConfig(),
+        });
+    };
+    
+    // Real-time status updates via message passing
+    chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type === 'STEP_UPDATE') {
+            setMessages(prev => [...prev, msg.update]);
+        }
+    });
+}
+```
+
+### 2.4 LLM Configuration
+
+Users configure different models per agent in Settings:
+
+```typescript
+interface LLMConfig {
+    planner: {
+        provider: 'openai' | 'anthropic' | 'google' | 'groq' | 'cerebras';
+        model: string;     // e.g., "gpt-4o"
+        apiKey: string;
+    };
+    navigator: {
+        provider: string;
+        model: string;     // e.g., "gpt-4o-mini" for lower cost
+        apiKey: string;
+    };
+    validator: {
+        provider: string;
+        model: string;
+        apiKey: string;
+    };
+}
+```
+
+**Recommended configurations:**
+```
+High performance:
+  Planner: GPT-4o
+  Navigator: GPT-4o
+  Validator: GPT-4o-mini
+
+Cost-effective:
+  Planner: GPT-4o-mini
+  Navigator: Claude-3-haiku
+  Validator: GPT-4o-mini
+```
+
+---
+
+## 3. Execution Flow
+
+```
+User opens Nanobrowser side panel
+Types: "Find a Bluetooth speaker on Amazon under $50"
+    ↓
+PlannerAgent.plan(goal, currentPageContext)
+    → Plan: ["Navigate to amazon.com",
+             "Search 'bluetooth speaker'",
+             "Filter by price under $50",
+             "Extract top 3 results"]
+    ↓
+For each step:
+    NavigatorAgent.executeStep(step, page)
+    ├─ Read DOM via content_script
+    ├─ LLM decides: click element X / type text Y
+    └─ Execute via Extension APIs
+    ↓
+ValidatorAgent.validate(goal, results)
+    → "Found 3 speakers matching criteria"
+    ↓
+Report to user in side panel chat
+```
+
+---
+
+## 4. Architecture Diagram
+
+```
+Chrome Extension
+  ├─ Side Panel (React UI)
+  │   └─ Chat interface, real-time updates
+  ├─ Background Service Worker
+  │   ├─ PlannerAgent → LLM API (external)
+  │   ├─ NavigatorAgent → LLM API (external)
+  │   └─ ValidatorAgent → LLM API (external)
+  └─ Content Script (per-tab)
+      ├─ DOM access (direct, no CDP)
+      ├─ Element interaction (Extension APIs)
+      └─ Screenshot (chrome.tabs.captureVisibleTab)
+```
+
+---
+
+## 5. Key Technical Decisions
+
+**Why Chrome Extension instead of CDP?**
+- CDP creates detectable automation signatures (WebSocket, `navigator.webdriver = true`)
+- Extension APIs are indistinguishable from normal browser behaviour
+- Extension can access the user's authenticated sessions, cookies, saved passwords
+
+**Why three separate agent roles?**
+- Each role can use a different (cheaper/faster) LLM
+- Planner does complex reasoning → high-capability model
+- Navigator does repetitive execution → cheaper model
+- Clean separation allows independent optimisation
+
+---
+
+## 6. Limitations
+
+- Chrome/Edge only (no Firefox, Safari)
+- No programmatic/CLI API — interaction is always via the GUI side panel
+- Cannot be integrated into automated pipelines or CI/CD
+- Requires user to be present at the browser
+
+**License:** Apache-2.0  
+**Language:** TypeScript  
 **Repository:** https://github.com/nanobrowser/nanobrowser  
-**Snapshot date:** 2026-03-18  
-
----
-
-## Architecture
-
-Nanobrowser is an **open-source Chrome Extension** that provides AI-powered web automation running entirely inside the user's local browser. It is architecturally distinct from server-side or Python-based frameworks: all execution happens within the browser process itself, with no external backend required.
-
-The extension implements a **multi-agent system** with three specialised roles:
-1. **Planner Agent** — receives the user's natural language goal, decomposes it into a sequence of sub-tasks, and coordinates the overall strategy. Performs self-correction when obstacles are encountered.
-2. **Navigator Agent** — executes individual navigation and interaction steps on the live page (click, type, scroll, extract).
-3. **Validator Agent** — verifies whether sub-tasks and the overall goal have been completed successfully.
-
-Users interact through a **side panel chat interface** embedded in Chrome. Tasks are submitted conversationally; the extension shows real-time status updates and allows follow-up questions.
-
-Each agent role can be assigned a different LLM model — e.g., a cheaper model for Navigator, a more capable model for Planner — allowing cost/performance trade-offs.
-
-The extension uses **Chrome Extension APIs** (not CDP/WebDriver) for browser access. This has privacy and detection-avoidance implications: the automation is executed in the same browser session as the user, with direct DOM access through content scripts.
-
----
-
-## Perception type
-
-**DOM / page content via Chrome Extension content scripts.** The agents read page content through the browser's built-in extension APIs. No raw screenshot-based vision is used in the default pipeline; perception is text/DOM-based.
-
----
-
-## LLM compatibility
-
-Flexible, user-configured. Supported providers (as of v0.2.x):
-- OpenAI (GPT-4o, GPT-4o-mini, etc.)
-- Anthropic (Claude)
-- Google (Gemini)
-- Groq
-- Cerebras
-- More being added
-
-Users bring their own API keys. Different models can be assigned to Planner vs. Navigator vs. Validator for cost optimisation.
-
----
-
-## Action interface
-
-The user submits natural language instructions via the side panel chat. Internally, the Navigator Agent executes atomic browser actions: click, type, scroll, navigate, extract. No programmatic action API is exposed — the interface is conversational only.
-
----
-
-## Dependencies
-
-- Chrome or Edge browser (Chromium-based; Firefox/Safari not supported)
-- LLM provider API keys (user-supplied)
-- No Python, no Node.js backend required — runs purely as a browser extension
-- Extension installed from Chrome Web Store or manually loaded from ZIP
-
----
-
-## Browser control method
-
-**Chrome Extension APIs** — content scripts, `chrome.tabs`, `chrome.scripting`, `chrome.storage`, etc. This is fundamentally different from CDP-based approaches: there is no debugging WebSocket, no external process, and no detectable automation flag. The automation runs within the normal browser profile, inheriting all cookies, sessions, and login state.
-
----
-
-## Strengths
-
-- **Privacy-first, local execution** — data never leaves the user's machine; no cloud backend.
-- **Free to use** — no subscription fees; pay only for LLM API usage.
-- **Uses normal browser session** — accesses authenticated sites, cookies, and sessions without additional auth configuration.
-- **Not detectable as automation** — uses Chrome Extension APIs instead of CDP, avoiding WebDriver fingerprinting.
-- **Multi-agent role separation** — cleaner task management with explicit Planner/Navigator/Validator split.
-- **Per-agent model assignment** — cost/performance optimisation by using cheaper models for simpler roles.
-- **Conversational follow-up** — users can ask contextual follow-up questions about completed tasks.
-- **No infrastructure setup** — install and go; no Docker, no Python environment.
-
----
-
-## Weaknesses
-
-- **Chrome/Edge only** — no cross-browser support.
-- **No programmatic API** — cannot be integrated into automated pipelines or CI/CD; interaction is always manual/conversational.
-- **Limited to the user's active browser** — not suitable for server-side, headless, or large-scale automation.
-- **No Python/JS SDK** — developers cannot build workflows programmatically on top of Nanobrowser.
-- **Shadow DOM support** in progress; some modern SPAs may behave unexpectedly.
-- **Session replay / workflow recording** not yet available (on roadmap).
-- **Community smaller than browser-use** — fewer integrations and less battle-testing.
-
----
-
-## Typical use cases
-
-- Personal productivity automation (research, form filling, data gathering)
-- Privacy-sensitive automation requiring access to authenticated sessions
-- Non-technical users wanting AI help with browser tasks without coding
-- Quick one-off automation tasks without infrastructure investment
-- Exploratory automation in environments where CDP-based tools are blocked
-
----
-
-## Additional notes for thesis research
-
-**Architectural classification:** Nanobrowser is the only framework in this comparison set that is implemented as a browser extension rather than a Python library, TypeScript library, or standalone server. This makes it uniquely suited for studying the *consumer/end-user* segment of the web agent ecosystem, as opposed to developer-facing frameworks.
-
-**Detection avoidance:** The Chrome Extension API approach is architecturally interesting from a security/ethics perspective — it is indistinguishable from normal human browsing at the protocol level. This is worth discussing in a section on anti-bot measures and ethical considerations.
-
-**Multi-agent specialisation:** The explicit Planner/Navigator/Validator role decomposition is simpler than browser-use's unified Agent but provides cleaner separation of concerns. Compare this to Agent-E's Planner/Navigator split — both converge on hierarchical decomposition as the right approach for complex tasks.
-
-**Reproducibility note:** Because Nanobrowser runs in the user's live browser session, exact reproducibility requires the same browser profile, login state, and page state — making it harder to reproduce results in a controlled academic setting. Note this limitation in your methodology.
+**Snapshot date:** 2026-03-18
