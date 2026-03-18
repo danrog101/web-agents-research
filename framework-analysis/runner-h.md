@@ -1,120 +1,172 @@
-# Runner H
+# Runner H Research Report
 
-**Framework name:** Runner H  
-**Developer:** H Company (The H Company, Paris, France)  
-**Repository:** Partially open — model weights on Hugging Face (`hcompany/hollow-one-7b-*`), product at https://runner.hcompany.ai  
-**Snapshot date:** 2026-03-18  
+## Executive Summary
+
+Runner H is an AI web agent developed by **H Company** (Paris, based on $220M raised), positioned as the most accurate web agent on the Steel leaderboard with its newer **Surfer 2** model at 97.1%. The framework is unique because H Company trained **in-house foundation models** (Hollow One family) specifically for GUI automation — a 3B VLM and 2B LLM that outperform much larger general-purpose models for browser tasks. Core model weights are open-sourced under Apache-2.0; the hosted product is commercial.
 
 ---
 
-## Architecture
+## 1. Architecture Overview
 
-Runner H is a **cloud-based AI web agent** and automation platform developed by H Company, a Paris-based AI lab that raised $220M. Unlike open-source frameworks, Runner H is primarily a hosted service, though H Company has open-sourced key **foundation model weights** under Apache-2.0.
+### Core Philosophy
 
-The architecture is built around **Hollow One**, a family of in-house foundation models:
-- **H-VLM (3B parameter Vision-Language Model)** — trained specifically for GUI understanding: extracting information from and interacting with interfaces and images.
-- **H-LLM (2B parameter Language Model)** — for task planning and reasoning.
-- **Hollow One Localizer** — a specialised model that maps natural language targets to pixel coordinates (`xy = localizer.find(screenshot, target)`).
-- **Hollow One Policy** — a planning model that decomposes goals into steps.
-- **Hollow One Validator** — verifies task completion.
+**Specialised small models beat large general models:** H Company's thesis is that a 3B parameter VLM trained specifically on GUI interaction data outperforms GPT-4o for web agent tasks at a fraction of the cost. This validates the "task-specific training" approach over prompt engineering of general models.
 
-The open-sourced `hollow-one-7b-policy` and `hollow-one-7b-localizer` models can be run locally:
+**Reinforcement Learning training:** The Hollow One models were trained with RL, not just supervised fine-tuning, enabling the models to develop strategies that work across diverse web interfaces.
 
-```python
-from hollow_one import Policy, Localizer
-policy = Policy.from_pretrained("hcompany/hollow-one-7b-policy")
-steps = policy.plan(goal="Extract 10 Top AI tools...")
+### Hollow One Model Family
+
+```
+hcompany/
+├── hollow-one-7b-policy     (HuggingFace, Apache-2.0)
+│   # Plans steps to achieve a goal
+│   # Input: goal string
+│   # Output: list of step descriptions
+│
+├── hollow-one-7b-localizer  (HuggingFace, Apache-2.0)
+│   # Maps natural language targets to pixel coordinates
+│   # Input: screenshot + target description
+│   # Output: (x, y) coordinates
+│
+└── hollow-one-7b-validator  (HuggingFace, Apache-2.0)
+    # Verifies task completion
+    # Input: screenshot + goal + action history
+    # Output: success/failure + explanation
 ```
 
-The hosted product provides a **Studio** for designing web automation pipelines via natural language or visual demonstration, with a self-healing mechanism that adapts to UI changes.
-
-H Company also offers:
-- **Surfer H** — an open SDK wrapping the Hollow One models for programmatic automation.
-- **Tester H** — a QA testing tool using the same browser agent technology.
+**H-VLM (3B parameter):** Vision-Language Model trained to extract information from and interact with GUIs and images.  
+**H-LLM (2B parameter):** Language Model for task planning and reasoning.
 
 ---
 
-## Perception type
+## 2. Core Components Deep Dive
 
-**Vision-first (VLM + pixel-coordinate localisation).** H-VLM processes browser screenshots to understand page state. The Localizer model specifically maps natural language descriptions to screen coordinates. No explicit DOM parsing pipeline — the system works at the visual layer.
+### 2.1 Hollow One Policy (`hcompany/hollow-one-7b-policy`)
 
----
+```python
+from hollow_one import Policy
 
-## LLM compatibility
+policy = Policy.from_pretrained("hcompany/hollow-one-7b-policy")
 
-**Proprietary in-house models only** in the hosted product. However:
-- The open-sourced `hollow-one-7b-*` weights can be run locally.
-- `surfer_h` SDK is compatible with these open-source weights.
-- The architecture does not appear to support swapping in third-party LLMs in the current product.
+# Plan a multi-step task
+steps = policy.plan(
+    goal="Extract 10 top AI tools listings and add to a Google Sheet"
+)
+# Returns list of step strings:
+# ["Navigate to ProductHunt", "Search for AI tools",
+#  "Extract top 10 listings", "Open Google Sheets", ...]
+print("\n".join(steps))
+```
 
----
+### 2.2 Hollow One Localizer (`hcompany/hollow-one-7b-localizer`)
 
-## Action interface
+```python
+from hollow_one import Localizer
+import PIL.Image as Image
 
-Natural language task descriptions for the hosted product. The `surfer_h` SDK exposes:
-- `agent.run(task, budget_usd)` — run a task with a cost budget
-- The Localizer can be used standalone: `localizer.find(screenshot, target)` → `(x, y)`
-- The Policy can plan steps: `policy.plan(goal)` → list of steps
+loc = Localizer.from_pretrained("hcompany/hollow-one-7b-localizer")
 
----
+# Find element by natural language description in screenshot
+xy = loc.find(
+    screenshot=Image.open("page_screenshot.png"),
+    target="Search button"
+)
+# Returns: (340, 220) — pixel coordinates
 
-## Dependencies
+# Execute click via browser automation
+browser.click(*xy)
+```
 
-- Hugging Face Transformers (for running local Hollow One models)
-- `hollow_one` Python package (for using open-sourced weights)
-- `surfer_h` package (SDK)
-- H Company account + API key (for hosted Runner H)
-- GPU recommended for local model inference (7B parameter models)
+### 2.3 Surfer H SDK
 
----
+```python
+from surfer_h import SurferAgent
 
-## Browser control method
+agent = SurferAgent(
+    policy="hollow-one-7b-policy",
+    localizer="hollow-one-7b-localizer",
+    validator="hollow-one-7b-validator"
+)
 
-**Proprietary cloud browser infrastructure** for the hosted product. For local use via Surfer H, browser control would use standard Playwright/Selenium with the Hollow One models providing vision-based interaction decisions. The exact local browser integration is not fully documented in public sources.
+result = agent.run(
+    task="Book a Sarova Stanley hotel Aug 3-6 and export confirmation to Notion",
+    budget_usd=0.25  # Cost limit
+)
+```
 
----
+### 2.4 WebClick Dataset
 
-## Strengths
-
-- **State-of-the-art benchmark** — ~67% on WebVoyager (Runner H), outperforming OpenAI Operator (61%) on the same benchmark.
-- **Specialised compact models** — 3B VLM and 2B LLM outperform much larger general-purpose models when powering browser agents, demonstrating that task-specific training > model size for this domain.
-- **Open model weights** — Hollow One models are Apache-2.0, enabling research use and local deployment.
-- **Self-healing automation** — adapts to UI changes without manual script updates.
-- **Strong backing** — $220M raised; investors include Amazon, Accel, Eric Schmidt.
-- **Reinforcement learning training** — models trained with RL for improved task completion.
-- **WebClick dataset** — 30k-episode click annotation dataset open-sourced for research.
-
----
-
-## Weaknesses
-
-- **Primarily a commercial product** — full capabilities require a paid H Company account.
-- **Limited documentation** for open-source components — the `hollow_one` and `surfer_h` libraries are not as well documented as browser-use or Stagehand.
-- **Closed product code** — the Studio, pipeline designer, and cloud infrastructure are proprietary.
-- **GPU requirement** for local model inference — not viable for CPU-only environments.
-- **No third-party LLM support** in the current product — locked to Hollow One models.
-- **Early-stage open-source community** — fewer contributors than established frameworks.
-
----
-
-## Typical use cases
-
-- Enterprise web automation pipelines (e.g., e-commerce order flows, financial onboarding)
-- AI-powered QA testing via Tester H
-- Research into specialised small VLMs for GUI automation
-- Building custom browser agents using open Hollow One model weights
-- Comparative benchmarking reference for the vision-first, trained-model approach
+H Company open-sourced WebClick — 30,000 episodes of click-level annotations:
+```
+WebClick Dataset (Apache-2.0)
+├── 30,000 click episodes
+├── Screenshots + target descriptions + click coordinates
+└── Used to train the Localizer model
+```
 
 ---
 
-## Additional notes for thesis research
+## 3. Execution Flow
 
-**Research significance:** Runner H is architecturally important because it demonstrates that **small, task-specifically trained models can outperform large general-purpose models** for web agent tasks. The 3B VLM outperforming GPT-4 variants on specific tasks is a key finding for efficiency-focused AI research.
+```
+Goal: "Book hotel and export to Notion"
+    ↓
+Policy.plan(goal)
+    → ["1. Navigate to booking.com",
+       "2. Search for hotel name",
+       "3. Select dates Aug 3-6",
+       ...]
+    ↓
+For each step:
+    Screenshot captured
+    ↓
+    Localizer.find(screenshot, step_target)
+    → (x, y) coordinates
+    ↓
+    Browser.click(x, y) or keyboard.type(...)
+    ↓
+    Validator.verify(screenshot, step_goal)
+    → success? continue : retry/recover
+    ↓
+All steps complete → task done
+```
 
-**Open model access:** Unlike OpenAI Operator, H Company has open-sourced the Hollow One model weights. This makes it possible to reproduce and study their approach. The `WebClick` dataset (30k episodes) is also publicly available for research.
+---
 
-**Benchmark context:** Runner H's ~67% WebVoyager score is from a published benchmark run. As with other frameworks, verify the exact test conditions and date against your snapshot.
+## 4. Architecture Diagram
 
-**Comparison axis:** Runner H vs. OpenAI Operator: both are vision-first, hosted products with proprietary models, but Runner H uses smaller specialised models while OpenAI uses a larger general model. This is an interesting efficiency vs. generality trade-off for your thesis.
+```
+Runner H / Surfer H
+  ├─ Hollow One Policy (7B)
+  │   └─ Goal → Step list
+  ├─ Hollow One Localizer (7B)
+  │   └─ Screenshot + Description → (x, y)
+  ├─ Hollow One Validator (7B)
+  │   └─ Screenshot + Goal → Success/Fail
+  └─ Browser (Playwright or local)
+      └─ Execute mouse/keyboard actions
+```
 
-**For cloning:** The product itself cannot be cloned, but `hollow_one` and `surfer_h` packages can be installed. Document which components are open vs. closed in your methodology section.
+---
+
+## 5. Key Technical Decisions
+
+**Why train models instead of prompting GPT-4?**
+Smaller specialised models (3B VLM) can match or exceed large general models (GPT-4V) at browser tasks while running at a fraction of the cost. H Company has published benchmarks showing this.
+
+**Why separate Policy/Localizer/Validator?**
+Decomposition into three single-purpose models improves accuracy — each model is optimised for its specific subtask. Contrast with end-to-end models that must handle all three simultaneously.
+
+---
+
+## 6. Limitations & Known Issues
+
+- GPU required for local inference (7B models need ~16GB VRAM)
+- Full product is commercial; open weights are research access
+- Limited documentation for `surfer_h` and `hollow_one` packages
+- No WebVoyager score for open-source weights (only hosted Runner H)
+
+**WebVoyager score:** Surfer 2 = 97.1% SOTA (hosted product), Runner H 0.1 = 67%  
+**License:** Apache-2.0 (model weights), Commercial (hosted product)  
+**Repository:** https://github.com/hcompany/hollow-one (model weights on HuggingFace)  
+**Snapshot date:** 2026-03-18
