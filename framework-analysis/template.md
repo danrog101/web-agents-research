@@ -1,19 +1,16 @@
 # [Framework Name] — Research Template
 
-> **Uputa za korištenje:** Ovaj template popuni za svaki framework koji istražuješ.  
-> Sva polja su obavezna. Za polja koja ne možeš pronaći, napiši `N/A — nije dokumentirano`.  
-> Datum snimke (snapshot) je važan za metodologiju — uvijek ga zabilježi.
 
 ---
 
 **Framework name:**  
-**Repository:** (GitHub URL ili "N/A — closed source")  
+**Repository:**  
 **Official website:**  
-**Snapshot date:** YYYY-MM-DD  
-**License:** (MIT / Apache-2.0 / AGPL / Commercial / Closed)  
-**Language:** (Python / TypeScript / Both / Other)  
+**Snapshot date:**   
+**License:** 
+**Language:** (
 **Developer/Organisation:**  
-**First public release:** (godina ili "nije poznato")  
+**First public release:** 
 
 ---
 
@@ -21,7 +18,6 @@
 
 > Opiši kako framework interno funkcionira. Što su glavne komponente? Kako izgledaju agentski loop ili pipeline? Postoji li više agenata koji surađuju?
 
-[Tekst ovdje]
 
 ---
 
@@ -52,7 +48,7 @@
 
 > Koji set akcija agent može izvršiti? Kako se zadaje zadatak? Postoji li programatski API?
 
-[Tekst ovdje — nabrojaj ključne akcije i API pozive]
+
 
 ---
 
@@ -71,7 +67,7 @@
 > Što framework koristi ispod haube za kontrolu browsera?
 > (Playwright / Selenium / CDP direktno / Chrome Extension API / Puppeteer / Vlastito)
 
-[Tekst ovdje]
+
 
 ---
 
@@ -106,7 +102,7 @@
 
 ## Typical use cases
 
-> Za što je ovaj framework idealan? Za što nije prikladan?
+
 
 **Idealno za:**
 - 
@@ -118,17 +114,16 @@
 
 ## Setup complexity
 
-> Koliko je teško postaviti i pokrenuti?  
-> Skala: 1 (pip install + api key) → 5 (Docker + baza + cloud account)
+
 
 **Ocjena:** /5  
-**Minimalni setup:** [opis najjednostavnijeg načina pokretanja]
+**Minimalni setup:**
 
 ---
 
 ## Open source vs. commercial
 
-> Je li open-source? Postoji li cloud varijanta? Koje su cijene?
+
 
 - Open source: DA / NE
 - Self-hostable: DA / NE  
@@ -139,7 +134,7 @@
 
 ## Community & maintenance
 
-> Koliko je aktivna zajednica? Kada je zadnji commit?
+
 
 - GitHub stars: (aproximativno)
 - Last commit: (datum ili "aktivno razvijano")
@@ -150,10 +145,6 @@
 
 ## Additional notes for thesis
 
-> Sve što je specifično relevantno za tvoj završni rad — usporedbe, metodološke napomene, zanimljive arhitekturalne detalje, upozorenja na netočne podatke u sekundarnim izvorima.
 
-[Tekst ovdje]
-
----
 
 *Template verzija: 1.0 | Zadnja izmjena: 2026-03-18*
