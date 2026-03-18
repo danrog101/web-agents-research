@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Browser-Use is an async Python >= 3.11 library that implements AI browser driver capabilities using LLMs + CDP (Chrome DevTools Protocol). It enables AI agents to autonomously navigate web pages, interact with elements, and complete complex tasks through an event-driven architecture. The library follows a DOM-centric approach where LLMs reason about elements by their index rather than pixel coordinates, making it fundamentally different from vision-first approaches like Magnitude.
+Browser-Use is an async Python (≥3.11) library that implements AI browser automation using LLMs + CDP (Chrome DevTools Protocol). It enables AI agents to autonomously navigate web pages, interact with elements, and complete complex tasks through an event-driven architecture. The library follows a **DOM-centric approach** where LLMs reason about elements by their integer index rather than pixel coordinates — making it fundamentally different from vision-first approaches like Magnitude or Skyvern.
 
 ---
 
@@ -10,41 +10,54 @@ Browser-Use is an async Python >= 3.11 library that implements AI browser driver
 
 ### Core Philosophy
 
-Browser-Use solves browser automation through a DOM-centric approach:
+Browser-Use solves browser automation through three interlocking design principles:
 
-1. **DOM-First Architecture**: Instead of vision and pixel coordinates, browser-use processes the DOM tree, assigns indices to clickable elements, and has the LLM select actions by referencing these indices. This provides deterministic element selection independent of visual layout.
+**DOM-First Architecture:** Instead of screenshots and pixel coordinates, browser-use processes the DOM tree, assigns sequential indices to every clickable/interactive element, and has the LLM select actions by referencing these indices (e.g., `CLICK [7]`). This provides deterministic element selection independent of visual layout.
 
-2. **Event-Driven Browser Management**: Uses the `bubus` event bus to coordinate multiple watchdog services that handle different aspects of browser state (downloads, popups, security, DOM snapshots).
+**Event-Driven Browser Management:** Uses the `bubus` event bus to coordinate multiple watchdog services that handle different aspects of browser state — downloads, popups, security, DOM snapshots, CAPTCHA, crashes.
 
-3. **Async Python Design**: Built from the ground up with async/await, requiring Python >= 3.11 for modern typing features.
+**Async Python Design:** Built from the ground up with `async/await`, requiring Python ≥3.11 for modern typing features (`str | None` instead of `Optional[str]`).
 
 ### Package Structure
 
 ```
 browser_use/
-├── agent/                    # Agent orchestration and execution
-│   ├── service.py           # Main Agent class
-│   ├── views.py             # AgentOutput, AgentHistory, ActionResult
+├── agent/
+│   ├── service.py           # Main Agent class — orchestration loop
+│   ├── views.py             # AgentOutput, AgentHistory, AgentSettings, ActionResult
 │   ├── message_manager/     # LLM context building
-│   └── system_prompts/      # LLM system prompts
-├── browser/                  # Browser lifecycle and CDP management
-│   ├── session.py           # BrowserSession (main browser controller)
-│   ├── profile.py           # BrowserProfile (configuration)
-│   ├── events.py            # Event definitions
-│   └── watchdogs/           # Watchdog services
-├── dom/                      # DOM processing
-│   ├── service.py           # DomService
-│   └── serializer/          # DOM-to-text serialization
-├── llm/                      # LLM provider abstraction
+│   └── system_prompt*.md    # System prompts in markdown
+├── browser/
+│   ├── session.py           # BrowserSession — CDP controller + event bus
+│   ├── profile.py           # BrowserProfile — launch args, display, extensions
+│   ├── events.py            # All event type definitions (Pydantic models)
+│   └── watchdogs/           # 12 modular watchdog services
+│       ├── downloads.py
+│       ├── popups.py
+│       ├── security.py
+│       ├── dom.py
+│       ├── captcha.py
+│       ├── crash.py
+│       └── ...
+├── dom/
+│   ├── service.py           # DomService — DOM extraction, serialisation
+│   └── serializer/          # DOM-to-text pipeline
+├── llm/
 │   ├── base.py              # BaseChatModel protocol
-│   └── [provider]/          # Provider-specific implementations
-├── tools/                    # Action registry
-│   ├── service.py           # Tools class
-│   └── registry/            # Action registration
-├── mcp/                      # MCP integration
-│   ├── server.py            # MCP server mode
-│   └── client.py            # MCP client mode
-└── controller/               # (empty - moved to tools)
+│   ├── openai/chat.py       # ChatOpenAI
+│   ├── anthropic/chat.py    # ChatAnthropic
+│   ├── google/chat.py       # ChatGoogle
+│   └── [provider]/          # 13+ more providers
+├── tools/
+│   ├── service.py           # Tools class + action registry
+│   └── registry/            # @registry.action decorator system
+├── mcp/
+│   ├── server.py            # Browser-use as MCP server
+│   └── client.py            # Connect to external MCP servers
+├── filesystem/
+│   └── file_system.py       # FileSystemState
+└── tokens/
+    └── views.py             # UsageSummary — token tracking
 ```
 
 ---
@@ -53,7 +66,7 @@ browser_use/
 
 ### 2.1 Agent System (`browser_use/agent/service.py`)
 
-The `Agent` class is the main orchestrator for LLM-driven browser automation.
+The `Agent` class is the main orchestrator for LLM-driven browser automation. It is generic over `Context` and `AgentStructuredOutput`.
 
 **Key Responsibilities:**
 - LLM integration and model management
@@ -62,7 +75,23 @@ The `Agent` class is the main orchestrator for LLM-driven browser automation.
 - History tracking and memory management
 - Telemetry emission
 
-**Configuration Options:**
+**Configuration (`AgentSettings` from `views.py`):**
+
+```python
+class AgentSettings(BaseModel):
+    use_vision: bool | Literal['auto'] = True
+    vision_detail_level: Literal['auto', 'low', 'high'] = 'auto'
+    save_conversation_path: str | Path | None = None
+    max_failures: int = 3
+    generate_gif: bool | str = False
+    override_system_message: str | None = None
+    extend_system_message: str | None = None
+    max_actions_per_step: int = 3
+    page_extraction_llm: BaseChatModel | None = None
+    # sensitive_data masking, allowed_domains, etc.
+```
+
+**Constructor signature (simplified):**
 
 ```python
 class Agent(Generic[Context, AgentStructuredOutput]):
@@ -70,24 +99,24 @@ class Agent(Generic[Context, AgentStructuredOutput]):
         self,
         task: str,
         llm: BaseChatModel | None = None,
+        browser: BrowserSession | None = None,
         browser_profile: BrowserProfile | None = None,
-        browser_session: BrowserSession | None = None,
         tools: Tools[Context] | None = None,
         sensitive_data: dict[str, str | dict[str, str]] | None = None,
         initial_actions: list[dict[str, dict[str, Any]]] | None = None,
+        output_model_schema: type[AgentStructuredOutput] | None = None,
         register_new_step_callback: Callable | None = None,
         register_done_callback: Callable | None = None,
-        # ... more options
     )
 ```
 
 **Key Methods:**
-- `run(max_steps=500)` - Execute the task with maximum steps
-- `step()` - Execute one step of the task
-- `save_trajectory()` - Save execution history
-- `rerun()` - Replay from saved trajectory
+- `run(max_steps=100)` — Execute the full task loop
+- `step()` — Execute one single step
+- `save_trajectory(path)` — Persist execution history to JSON
+- `rerun(history, task)` — Replay from saved trajectory with variable substitution
 
-**Agent Output Structure:**
+**AgentOutput structure:**
 
 ```python
 class AgentOutput(BaseModel):
@@ -95,16 +124,12 @@ class AgentOutput(BaseModel):
     evaluation_previous_goal: str | None = None
     memory: str | None = None
     next_goal: str | None = None
-    current_plan_item: int | None = None
-    plan_update: list[str] | None = None
-    action: list[ActionModel]  # At least one action required
+    action: list[ActionModel]  # At least one required
 ```
 
 ### 2.2 Action System (`browser_use/tools/service.py`)
 
-Actions are the atomic units of behavior, registered through a decorator-based system.
-
-**Action Definition Pattern:**
+Actions are atomic units of behaviour, registered via a decorator pattern:
 
 ```python
 @registry.action(
@@ -112,129 +137,108 @@ Actions are the atomic units of behavior, registered through a decorator-based s
     param_model=ClickElementAction,
 )
 async def click(params: ClickElementAction, browser_session: BrowserSession):
-    # Action implementation
-    return ActionResult(extracted_content="...")
+    # implementation
+    return ActionResult(extracted_content="Clicked element [7]")
 ```
 
 **Available Action Categories:**
 
-1. **Navigation Actions:**
-   - `search` - Search text on page
-   - `navigate` - Go to URL
-   - `go_back` / `go_forward` - Browser history
-   - `refresh` - Reload page
+| Category | Actions |
+|----------|---------|
+| Navigation | `navigate`, `go_back`, `go_forward`, `refresh`, `search` |
+| Element interaction | `click`, `click_element_with_text`, `input_text`, `send_keys` |
+| Dropdowns | `get_dropdown_options`, `select_dropdown_option` |
+| Tabs | `switch_to_tab`, `close_tab`, `open_tab` |
+| Scroll | `scroll`, `scroll_to_text` |
+| Content | `extract_content`, `screenshot`, `get_page_source` |
+| Files | `upload_file`, `write_file`, `read_file` |
+| Task | `done`, `wait` |
 
-2. **Element Interaction Actions:**
-   - `click` - Click by index or coordinates
-   - `click_element_with_text` - Click by text match
-   - `input_text` - Type into element
-   - `send_keys` - Keyboard shortcuts
-
-3. **Dropdown Actions:**
-   - `get_dropdown_options` - List options
-   - `select_dropdown_option` - Select option by text
-
-4. **Tab Management Actions:**
-   - `switch_to_tab` - Switch browser tab
-   - `close_tab` - Close tab
-
-5. **Scroll Actions:**
-   - `scroll` - Scroll up/down
-   - `scroll_to_text` - Scroll to text
-
-6. **Content Actions:**
-   - `extract_content` - Extract structured data
-   - `screenshot` - Capture screenshot
-
-7. **Task Actions:**
-   - `done` - Mark task complete
-   - `wait` - Wait for specified time
-
-**ActionResult Structure:**
+**ActionResult structure:**
 
 ```python
 class ActionResult(BaseModel):
     is_done: bool | None = False
     success: bool | None = None
-    judgement: JudgementResult | None = None
     error: str | None = None
-    attachments: list[str] | None = None
     extracted_content: str | None = None
-    include_extracted_content_only_once: bool = False
     long_term_memory: str | None = None
+    include_extracted_content_only_once: bool = False
 ```
 
-### 2.3 Browser Session (`browser_use/browser/session.py`)
+**Custom actions** (developer extension point):
 
-`BrowserSession` is the event-driven browser controller with CDP integration.
+```python
+from browser_use import Tools
 
-**Key Features:**
-- 2-layer architecture: high-level event handling + direct CDP/Playwright calls
-- Event-driven and imperative calling styles
-- Singleton browser instance management
-- CDP connection via `cdp-use` library
+tools = Tools()
 
-**Configuration:**
+@tools.action(description='Send a Slack notification')
+async def send_slack(message: str) -> str:
+    # your logic here
+    return f"Sent: {message}"
+
+agent = Agent(task="...", llm=llm, tools=tools)
+```
+
+### 2.3 BrowserSession (`browser_use/browser/session.py`)
+
+BrowserSession is the event-driven browser controller with CDP integration via the `cdp-use` thin wrapper.
+
+**Architecture:** 2-layer design
+- **High level:** event bus dispatch to watchdogs
+- **Low level:** direct CDP/cdp-use calls
 
 ```python
 class BrowserSession(BaseModel):
     def __init__(
         self,
-        # Cloud browser params
+        # Cloud browser
         cloud_profile_id: UUID | str | None = None,
-        cloud_proxy_country_code: ProxyCountryCode | None = None,
-        # Local browser params
+        # Local browser
         cdp_url: str | None = None,
         headless: bool = False,
         user_data_dir: str | None = None,
         # Security
         allowed_domains: list[str] | None = None,
         prohibited_domains: list[str] | None = None,
-        # ... more options
+        # Display
+        viewport_width: int = 1280,
+        viewport_height: int = 720,
     )
 ```
 
 **Key Methods:**
-- `start()` / `stop()` - Lifecycle management
-- `dispatch_event()` - Emit events to watchdogs
-- `wait_for_event()` - Wait for specific event
+- `start()` / `stop()` — Lifecycle
+- `dispatch_event(event)` — Emit to event bus
+- `wait_for_event(event_type, timeout)` — Block until event received
+- `get_current_state()` — Full browser state snapshot
+
+**CDP integration via `cdp-use`:**
+
+```python
+# Type-safe CDP calls
+cdp_client.send.DOMSnapshot.enable(session_id=session_id)
+cdp_client.send.Target.attachToTarget(
+    params=ActivateTargetParameters(targetId=target_id, flatten=True)
+)
+# Event registration
+cdp_client.register.Browser.downloadWillBegin(callback_func)
+```
 
 ### 2.4 Event System (`browser_use/browser/events.py`)
 
-The event system uses Pydantic models for type-safe event definitions.
+All events are Pydantic models for type safety. Categories:
 
-**Event Categories:**
-
-1. **Browser Lifecycle Events:**
-   - `BrowserStartEvent`, `BrowserStopEvent`
-   - `BrowserConnectedEvent`, `BrowserStoppedEvent`
-   - `BrowserLaunchEvent`, `BrowserKillEvent`
-
-2. **Navigation Events:**
-   - `NavigateToUrlEvent`
-   - `NavigationStartedEvent`, `NavigationCompleteEvent`
-   - `GoBackEvent`, `GoForwardEvent`, `RefreshEvent`
-
-3. **Element Interaction Events:**
-   - `ClickElementEvent`, `ClickCoordinateEvent`
-   - `TypeTextEvent`
-   - `ScrollEvent`
-
-4. **Tab Events:**
-   - `SwitchTabEvent`, `CloseTabEvent`
-   - `TabCreatedEvent`, `TabClosedEvent`
-
-5. **Download Events:**
-   - `DownloadStartedEvent`, `DownloadProgressEvent`
-   - `FileDownloadedEvent`
-
-6. **Dialog Events:**
-   - `DialogOpenedEvent`
-
-7. **CAPTCHA Events:**
-   - `CaptchaSolverStartedEvent`, `CaptchaSolverFinishedEvent`
-
-**Event Pattern:**
+| Category | Examples |
+|----------|---------|
+| Browser lifecycle | `BrowserStartEvent`, `BrowserStopEvent`, `BrowserLaunchEvent` |
+| Navigation | `NavigateToUrlEvent`, `NavigationCompleteEvent`, `GoBackEvent` |
+| Element interaction | `ClickElementEvent`, `TypeTextEvent`, `ScrollEvent` |
+| Tabs | `SwitchTabEvent`, `TabCreatedEvent`, `TabClosedEvent` |
+| Downloads | `DownloadStartedEvent`, `FileDownloadedEvent` |
+| Dialogs | `DialogOpenedEvent` |
+| CAPTCHA | `CaptchaSolverStartedEvent`, `CaptchaSolverFinishedEvent` |
 
 ```python
 class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None]):
@@ -246,42 +250,39 @@ class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None]):
 
 ### 2.5 Watchdog Services (`browser_use/browser/watchdogs/`)
 
-Watchdogs are modular services that respond to events and handle specific concerns.
-
-**BaseWatchdog Pattern:**
+Watchdogs are modular services that subscribe to events and handle specific browser concerns. They register handlers by method naming convention: `on_EventTypeName`.
 
 ```python
 class BaseWatchdog(BaseModel):
-    """Watchdogs monitor browser state and emit events based on changes.
-    
-    Handler methods should be named: on_EventTypeName(self, event: EventTypeName)
-    """
     LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = []
     EMITS: ClassVar[list[type[BaseEvent[Any]]]] = []
-```
 
-**Available Watchdogs:**
+class DownloadsWatchdog(BaseWatchdog):
+    LISTENS_TO = [DownloadStartedEvent, FileDownloadedEvent]
+    
+    async def on_DownloadStartedEvent(self, event: DownloadStartedEvent):
+        # handle download
+        pass
+```
 
 | Watchdog | Purpose |
 |----------|---------|
 | `DownloadsWatchdog` | PDF auto-download, file management |
 | `PopupsWatchdog` | JavaScript dialogs (alert, confirm, prompt) |
-| `SecurityWatchdog` | Domain restrictions, security policies |
+| `SecurityWatchdog` | Domain restrictions, allowed/prohibited lists |
 | `DOMWatchdog` | DOM snapshots, element highlighting |
-| `AboutBlankWatchdog` | about:blank page handling with DVD screensaver |
 | `CaptchaWatchdog` | CAPTCHA detection and solving |
-| `CrashWatchdog` | Browser crash recovery |
-| `ScreenshotWatchdog` | Screenshot management |
-| `StorageStateWatchdog` | Cookie/storage persistence |
+| `CrashWatchdog` | Browser crash recovery, automatic reconnect |
+| `ScreenshotWatchdog` | Screenshot capture management |
+| `StorageStateWatchdog` | Cookie/localStorage persistence |
 | `PermissionsWatchdog` | Browser permission handling |
-| `HARRecordingWatchdog` | HAR file generation |
-| `DefaultActionWatchdog` | Default action execution |
+| `HARRecordingWatchdog` | HAR file generation for debugging |
+| `AboutBlankWatchdog` | about:blank page handling |
+| `DefaultActionWatchdog` | Fallback default action execution |
 
 ### 2.6 DOM Service (`browser_use/dom/service.py`)
 
-`DomService` handles DOM tree extraction and processing.
-
-**Configuration:**
+DomService handles DOM tree extraction, element indexing, and serialisation for LLM consumption.
 
 ```python
 class DomService:
@@ -296,34 +297,37 @@ class DomService:
     )
 ```
 
-**Key Features:**
-- DOM tree extraction with clickable element identification
-- Element highlighting with colored bounding boxes
-- Cross-origin iframe handling
-- Paint order filtering for z-index awareness
-- Accessibility tree integration
-
-**DOM Serialization Pipeline:**
+**DOM Serialisation Pipeline:**
 
 ```
 Raw HTML/DOM
     ↓
-Clickable Element Detection
+Accessibility Tree extraction (a11y API)
     ↓
-Element Index Assignment
+Clickable Element Detection (buttons, links, inputs)
     ↓
-Bounding Box Highlighting
+Viewport filtering (only visible elements)
     ↓
-Text Serialization (with indices)
+Paint order filtering (z-index awareness)
     ↓
-LLM Consumption
+Integer Index Assignment [1], [2], [3]...
+    ↓
+Bounding Box Calculation + Highlight (colored borders)
+    ↓
+Text Serialisation → "[7] <button>Add to Cart</button>"
+    ↓
+LLM Context Ready
 ```
+
+**Key features:**
+- Accessibility tree > raw HTML (closer to what automation needs)
+- Cross-origin iframe support (opt-in)
+- Paint-order filtering prevents clicking on hidden elements
+- Coloured bounding box highlighting for visual debugging
 
 ### 2.7 LLM Integration (`browser_use/llm/`)
 
-The LLM layer provides a unified abstraction over multiple providers.
-
-**Base Protocol:**
+Unified `BaseChatModel` protocol all providers implement:
 
 ```python
 class BaseChatModel(Protocol):
@@ -333,40 +337,25 @@ class BaseChatModel(Protocol):
     def provider(self) -> str: ...
     
     async def ainvoke(
-        self, 
-        messages: list[BaseMessage], 
+        self,
+        messages: list[BaseMessage],
         output_format: type[T] | None = None
     ) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]: ...
 ```
 
-**Supported Providers:**
-
-| Provider | Class | Notes |
-|----------|-------|-------|
-| OpenAI | `ChatOpenAI` | GPT-4o, GPT-4o-mini, O1, O3, GPT-5 |
-| Anthropic | `ChatAnthropic` | Claude 3.5, 4 |
-| Google | `ChatGoogle` | Gemini 2.0, 2.5 |
-| Azure | `ChatAzureOpenAI` | Azure-hosted OpenAI |
-| AWS Bedrock | `ChatAWSBedrock`, `ChatAnthropicBedrock` | Bedrock models |
-| Groq | `ChatGroq` | Fast inference |
-| DeepSeek | `ChatDeepSeek` | DeepSeek models |
-| Mistral | `ChatMistral` | Mistral models |
-| Ollama | `ChatOllama` | Local models |
-| OpenRouter | `ChatOpenRouter` | Multi-provider gateway |
-| Cerebras | `ChatCerebras` | Fast inference |
-| Vercel | `ChatVercel` | Vercel AI SDK |
-| Browser-Use Cloud | `ChatBrowserUse` | Browser-use hosted |
-
-**Usage Pattern:**
+**Supported Providers (from `__init__.py`):**
 
 ```python
-from browser_use.llm import ChatOpenAI, ChatAnthropic, ChatGoogle
-
-# Create LLM instance
-llm = ChatOpenAI(model="gpt-4o")
-
-# Use with Agent
-agent = Agent(task="...", llm=llm)
+from browser_use import (
+    ChatOpenAI,      # GPT-4o, o1, o3, GPT-5
+    ChatAnthropic,   # Claude 3.5, Claude Sonnet 4
+    ChatGoogle,      # Gemini 2.0, 2.5
+    ChatGroq,        # Fast inference
+    ChatOllama,      # Local models
+    ChatAzureOpenAI, # Azure-hosted
+    # + DeepSeek, Mistral, Cerebras, Vercel, OpenRouter, Bedrock
+    ChatBrowserUse,  # Hosted bu-* models optimised for automation
+)
 ```
 
 ---
@@ -376,68 +365,71 @@ agent = Agent(task="...", llm=llm)
 ### High-Level Run Flow
 
 ```
-1. User calls agent.run(max_steps)
-   ↓
-2. Setup signal handlers for graceful shutdown
-   ↓
-3. Start browser session (if not provided)
-   ↓
-4. Enter step loop (up to max_steps):
-   ├─ Execute single step:
-   │  ├─ Check for CAPTCHA (wait if solving)
-   │  ├─ Prepare context (get browser state)
-   │  ├─ Build message context
-   │  ├─ Call LLM for action decision
-   │  ├─ Parse and validate actions
-   │  ├─ Execute each action
-   │  ├─ Record result and state
-   │  └─ Check for done action
-   └─ Repeat until done or error
-   ↓
-5. Close browser (if owned)
-   ↓
-6. Return AgentHistoryList
+agent.run(max_steps=100)
+    ↓
+Signal handlers setup (graceful Ctrl+C)
+    ↓
+BrowserSession.start() — launch Chromium via CDP
+    ↓
+┌─────────────── STEP LOOP ───────────────┐
+│                                          │
+│  1. Wait if CAPTCHA solving              │
+│  2. _prepare_context()                   │
+│     └─ BrowserSession.get_current_state()│
+│        └─ DomService.get_serialized_dom()│
+│  3. MessageManager.build_context()       │
+│     ├─ System prompt (markdown file)     │
+│     ├─ Browser state (DOM + URL + tabs)  │
+│     ├─ Action history                    │
+│     └─ Optional screenshot               │
+│  4. llm.ainvoke(messages, AgentOutput)   │
+│  5. parse_actions(response.action)       │
+│  6. execute each action                  │
+│     └─ dispatch_event(ActionEvent)       │
+│        └─ Watchdog handles → CDP call    │
+│  7. Record AgentHistory                  │
+│  8. if done action → break               │
+│                                          │
+└──────────────────────────────────────────┘
+    ↓
+BrowserSession.stop()
+    ↓
+Return AgentHistoryList
 ```
 
 ### Step Execution Detail
 
 ```python
 async def step(self, step_info: AgentStepInfo | None = None) -> None:
-    # Phase 0: Wait for CAPTCHA if solving
-    captcha_wait = await self.browser_session.wait_if_captcha_solving()
+    # Phase 0: CAPTCHA check
+    await self.browser_session.wait_if_captcha_solving()
     
-    # Phase 1: Prepare context
-    browser_state_summary = await self._prepare_context(step_info)
+    # Phase 1: Context preparation
+    browser_state = await self._prepare_context(step_info)
     
-    # Phase 2: Build message context
+    # Phase 2: Message building
     messages = await self.message_manager.build_context(
-        browser_state_summary, 
-        action_history
+        browser_state, action_history
     )
     
-    # Phase 3: Get LLM response
+    # Phase 3: LLM call
     response = await self.llm.ainvoke(messages, AgentOutput)
     
-    # Phase 4: Parse actions
+    # Phase 4: Action parsing
     parsed_actions = self.parse_actions(response.action)
     
-    # Phase 5: Execute actions
+    # Phase 5: Execution
     for action in parsed_actions:
         result = await self.execute_action(action)
         self.state.last_result.append(result)
     
-    # Phase 6: Record history
-    self.history.append(AgentHistory(...))
+    # Phase 6: History recording
+    self.history.append(AgentHistory(
+        model_output=response,
+        result=self.state.last_result,
+        state=browser_state,
+    ))
 ```
-
-### Context Building
-
-The context passed to the LLM includes:
-
-1. **System Message**: Task instructions and system prompt
-2. **Browser State**: DOM content, URL, tabs, screenshot
-3. **Action History**: Previous actions and results
-4. **User Message**: Current task reminder
 
 ---
 
@@ -446,28 +438,12 @@ The context passed to the LLM includes:
 ### 4.1 LLM Configuration
 
 ```python
-from browser_use.llm import ChatOpenAI, ChatAnthropic, ChatGoogle
+from browser_use import ChatOpenAI, ChatAnthropic, ChatGoogle
 
-# OpenAI
-llm = ChatOpenAI(
-    model="gpt-4o",
-    api_key="sk-...",
-    temperature=0.2
-)
-
-# Anthropic
-llm = ChatAnthropic(
-    model="claude-sonnet-4-20250514",
-    api_key="sk-ant-...",
-    temperature=0.2
-)
-
-# Google
-llm = ChatGoogle(
-    model="gemini-2.5-pro",
-    api_key="...",
-    temperature=0.2
-)
+llm = ChatOpenAI(model="gpt-4o", api_key="sk-...", temperature=0.2)
+llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0.2)
+llm = ChatGoogle(model="gemini-2.5-pro", temperature=0.2)
+llm = ChatBrowserUse()  # Optimised hosted model, 3-5x faster
 ```
 
 ### 4.2 Browser Configuration
@@ -476,30 +452,16 @@ llm = ChatGoogle(
 from browser_use.browser.profile import BrowserProfile
 
 profile = BrowserProfile(
-    # Connection
-    cdp_url="http://localhost:9222",  # Connect to existing
+    cdp_url="http://localhost:9222",  # Connect to existing Chrome
     headless=False,
-    
-    # User data
     user_data_dir="./browser_profile",
-    
-    # Display
     viewport_width=1280,
     viewport_height=720,
-    
-    # Security
     allowed_domains=["example.com"],
     prohibited_domains=["ads.com"],
-    
-    # Extensions
+    proxy={"server": "http://proxy:8080", "username": "u", "password": "p"},
     extensions=["/path/to/extension"],
-    
-    # Proxy
-    proxy={
-        "server": "http://proxy:8080",
-        "username": "user",
-        "password": "pass"
-    }
+    args=['--disable-blink-features=AutomationControlled'],
 )
 ```
 
@@ -509,534 +471,94 @@ profile = BrowserProfile(
 from browser_use import Agent
 
 agent = Agent(
-    task="Search for Python tutorials",
+    task="Go to amazon.com, search for wireless headphones, add first result to cart",
     llm=llm,
     browser_profile=profile,
-    
-    # Advanced options
-    max_actions_per_step=10,
-    use_vision=True,
-    tool_calling_method="auto",
-    
-    # Callbacks
-    register_new_step_callback=my_callback,
-    
-    # Sensitive data (masked in logs)
-    sensitive_data={
+    max_actions_per_step=3,
+    use_vision=True,          # 'auto', True, False
+    sensitive_data={           # Values masked in logs as {{key}}
         "username": "user@example.com",
         "password": "secret123"
-    }
+    },
+    register_new_step_callback=my_callback,
+    output_model_schema=MyPydanticOutput,  # Structured output
 )
+
+result = await agent.run(max_steps=50)
 ```
 
 ---
 
-## 5. Data Extraction System
-
-### Content Extraction
-
-Browser-use provides structured content extraction through LLM-powered parsing.
-
-```python
-# Using extract_content action
-result = await agent.step()
-
-# Extraction with Zod-like schema
-class ProductInfo(BaseModel):
-    name: str
-    price: float
-    in_stock: bool
-
-# The extract_content action uses the page_extraction_llm
-# to parse structured data from the page
-```
-
-### DOM Processing Pipeline
-
-```
-Page HTML
-    ↓
-Parse DOM Tree
-    ↓
-Identify Clickable Elements (buttons, links, inputs)
-    ↓
-Assign Unique Indices
-    ↓
-Calculate Bounding Boxes
-    ↓
-Filter by Viewport & Paint Order
-    ↓
-Serialize to Text (with [index] notation)
-    ↓
-Highlight Elements (colored borders)
-    ↓
-LLM Context Ready
-```
-
----
-
-## 6. Testing Framework
-
-### Test Structure
-
-Tests use pytest with pytest-httpserver for local HTTP mocking.
-
-**Directory Structure:**
-
-```
-tests/
-├── ci/                      # CI-run tests (discovered automatically)
-│   ├── conftest.py         # Shared fixtures
-│   ├── browser/            # Browser tests
-│   ├── models/             # LLM provider tests
-│   ├── interactions/       # Interaction tests
-│   ├── security/           # Security tests
-│   └── test_*.py           # Various feature tests
-└── conftest.py             # Root fixtures
-```
-
-### Key Testing Patterns
-
-**Mock LLM Responses:**
-
-```python
-# In conftest.py
-@pytest.fixture
-def mock_llm():
-    """Provides a mock LLM that returns predefined responses"""
-    from browser_use.llm import ChatOpenAI
-    # Returns mock with configurable responses
-```
-
-**HTTP Server for HTML:**
-
-```python
-def test_navigation(httpserver):
-    httpserver.expect_request("/test").respond_with_data(
-        "<html><body>Test Page</body></html>"
-    )
-    
-    # Agent navigates to httpserver.url_for("/test")
-```
-
-### Running Tests
-
-```bash
-# Run CI tests
-uv run pytest -vxs tests/ci
-
-# Run all tests
-uv run pytest -vxs tests/
-
-# Run single test
-uv run pytest -vxs tests/ci/test_specific.py
-```
-
----
-
-## 7. Event System Deep Dive
-
-### Event Bus Architecture
-
-Browser-use uses the `bubus` event bus for decoupled component communication.
-
-**Event Flow:**
-
-```
-Agent/Tools
-    ↓ dispatch_event()
-EventBus
-    ↓ route to handlers
-Watchdogs (on_EventName methods)
-    ↓ process event
-Return Result
-```
-
-### Event Handler Registration
-
-Watchdogs automatically register handlers based on method naming:
-
-```python
-class DownloadsWatchdog(BaseWatchdog):
-    LISTENS_TO = [DownloadStartedEvent, FileDownloadedEvent]
-    EMITS = [DownloadProgressEvent]
-    
-    async def on_DownloadStartedEvent(self, event: DownloadStartedEvent):
-        # Handle download start
-        pass
-```
-
----
-
-## 8. MCP Integration
+## 5. MCP Integration
 
 ### MCP Server Mode
 
-Browser-use can run as an MCP server, exposing browser automation tools:
-
 ```bash
-# Run as MCP server
+# Run browser-use as an MCP server
 uvx browser-use[cli] --mcp
 ```
 
-**Claude Desktop Configuration:**
-
 ```json
+// Claude Desktop mcp config
 {
-    "mcpServers": {
-        "browser-use": {
-            "command": "uvx",
-            "args": ["browser-use[cli]", "--mcp"],
-            "env": {
-                "OPENAI_API_KEY": "sk-..."
-            }
-        }
+  "mcpServers": {
+    "browser-use": {
+      "command": "uvx",
+      "args": ["browser-use[cli]", "--mcp"],
+      "env": { "OPENAI_API_KEY": "sk-..." }
     }
+  }
 }
 ```
 
 ### MCP Client Mode
 
-Browser-use can connect to external MCP servers and use their tools:
-
 ```python
 from browser_use.mcp.client import MCPClient
 
-mcp_client = MCPClient(
-    server_name="filesystem",
-    command="npx",
-    args=["@modelcontextprotocol/server-filesystem"]
-)
-
-await mcp_client.register_to_tools(tools)
-
-# MCP tools now available as browser-use actions
-```
-
----
-
-## 9. Advanced Features
-
-### Custom Actions
-
-```python
-from browser_use.tools.service import Tools
-
-tools = Tools()
-
-@tools.action("Send Slack message")
-async def send_slack(
-    params: SlackParams, 
-    browser_session: BrowserSession
-) -> ActionResult:
-    # Custom implementation
-    return ActionResult(extracted_content="Message sent")
-```
-
-### Flash Mode
-
-For faster execution with simpler models:
-
-```python
-agent = Agent(
-    task="...",
-    llm=llm,
-    use_thinking=False  # Disables thinking, evaluation, next_goal
-)
-```
-
-### Structured Output
-
-```python
-class TaskResult(BaseModel):
-    summary: str
-    items: list[str]
-
-agent = Agent(task="...", llm=llm)
-agent.tools.use_structured_output_action(TaskResult)
-
-result = await agent.run()
-output = result.final_result()  # Returns TaskResult instance
-```
-
----
-
-## 10. Performance Optimizations
-
-### Prompt Caching
-
-Anthropic models support prompt caching:
-
-```python
-llm = ChatAnthropic(
-    model="claude-sonnet-4-20250514",
-    # Automatic caching of system prompt and history
-)
-```
-
-### Screenshot Management
-
-- Configurable vision modes: `auto`, `always`, `never`
-- Screenshot exclusion zones for sensitive content
-- Base64 encoding for efficient transmission
-
-### Parallel Operations
-
-- Concurrent CDP calls where possible
-- Async DOM processing
-- Non-blocking event handling
-
----
-
-## 11. Error Handling & Reliability
-
-### Retry Strategies
-
-```python
-# Built-in retry for LLM calls
-llm = ChatOpenAI(model="gpt-4o")
-# Automatic retry on rate limits and transient errors
-```
-
-### Stability Detection
-
-- Network idle waiting
-- DOM mutation monitoring
-- Configurable timeouts
-
-### Graceful Degradation
-
-- Browser crash recovery via `CrashWatchdog`
-- Automatic reconnection to CDP
-- Fallback to simpler actions on failure
-
----
-
-## 12. Security & Privacy
-
-### Domain Filtering
-
-```python
-profile = BrowserProfile(
-    allowed_domains=["trusted-site.com"],
-    prohibited_domains=["ads.com", "tracker.com"]
-)
-```
-
-### Sensitive Data Handling
-
-```python
-agent = Agent(
-    task="Login to example.com",
-    sensitive_data={
-        "username": "user@example.com",
-        "password": "secret123"
-    }
-)
-
-# In action: {{username}} and {{password}} are replaced
-# Logs show: {{username}} instead of actual value
-```
-
-### Anti-Detection
-
-```python
-profile = BrowserProfile(
-    args=[
-        '--disable-blink-features=AutomationControlled'
-    ]
-)
-```
-
----
-
-## 13. Development Workflow
-
-### Setup
-
-```bash
-# Create venv
-uv venv --python 3.11
-source .venv/bin/activate
-
-# Install dependencies
-uv sync
-```
-
-### Quality Checks
-
-```bash
-# Type checking
-uv run pyright
-
-# Linting
-uv run ruff check --fix
-
-# Formatting
-uv run ruff format
-
-# Pre-commit
-uv run pre-commit run --all-files
-```
-
-### Testing
-
-```bash
-# CI tests
-uv run pytest -vxs tests/ci
-
-# All tests
-uv run pytest -vxs tests/
-```
-
----
-
-## 14. Best Practices
-
-### Task Design
-
-**Good:**
-```python
-task = "Go to amazon.com, search for 'wireless headphones', and add the first result to cart"
-```
-
-**Bad:**
-```python
-task = "Buy something"  # Too vague
-task = "Click at (500, 300)"  # Too specific, defeats purpose
-```
-
-### Action Granularity
-
-- Let the LLM decide the steps
-- Provide clear success criteria
-- Break complex tasks into phases
-
-### Error Handling
-
-```python
-try:
-    result = await agent.run()
-except AgentError as e:
-    if "timeout" in str(e):
-        # Handle timeout
-        pass
-```
-
----
-
-## 15. Limitations & Known Issues
-
-### Current Limitations
-
-1. **Chromium Only**: Only Chromium-based browsers via CDP
-2. **No Firefox/Safari**: CDP protocol not available
-3. **Element Detection**: Complex Shadow DOM may require configuration
-4. **Cross-Origin iframes**: Requires explicit enabling
-
-### Model Requirements
-
-**Minimum:**
-- Function calling support
-- Structured output capability
-- 32k+ context window
-
-**Recommended:**
-- GPT-4o, Claude Sonnet 4, or Gemini 2.5 Pro
-- Vision capability for screenshot analysis
-- 100k+ context for complex tasks
-
----
-
-## 16. Roadmap & Future Features
-
-### In Progress
-- Enhanced multi-tab coordination
-- Improved iframe handling
-- Better element detection algorithms
-
-### Planned
-- Firefox support via WebDriver BiDi
-- Mobile browser support
-- Enhanced memory persistence
-
----
-
-## 17. Code Examples
-
-### Basic Browser Automation
-
-```python
-import asyncio
-from browser_use import Agent
-from browser_use.llm import ChatOpenAI
-
-async def main():
-    agent = Agent(
-        task="Go to github.com and search for browser-use",
-        llm=ChatOpenAI(model="gpt-4o")
-    )
-    result = await agent.run()
-    print(result.final_result())
-
-asyncio.run(main())
-```
-
-### With Custom Actions
-
-```python
-from browser_use import Agent
-from browser_use.tools.service import Tools
-from browser_use.llm import ChatOpenAI
-from pydantic import BaseModel
-
-class NotifyParams(BaseModel):
-    message: str
-
-tools = Tools()
-
-@tools.action("Send notification")
-async def notify(params: NotifyParams) -> ActionResult:
-    print(f"NOTIFICATION: {params.message}")
-    return ActionResult(extracted_content="Notification sent")
-
-agent = Agent(
-    task="Search for Python and notify me of results",
-    llm=ChatOpenAI(model="gpt-4o"),
-    tools=tools
-)
-
-await agent.run()
-```
-
-### MCP Integration
-
-```python
-from browser_use import Agent
-from browser_use.mcp.client import MCPClient
-from browser_use.llm import ChatOpenAI
-
-# Connect to MCP server
 mcp = MCPClient(
     server_name="filesystem",
     command="npx",
     args=["@modelcontextprotocol/server-filesystem"]
 )
-
-# Use with agent
-agent = Agent(
-    task="Read files and summarize",
-    llm=ChatOpenAI(model="gpt-4o")
-)
-
 await mcp.register_to_tools(agent.tools)
+# MCP tools now available as browser-use actions
 await agent.run()
 await mcp.disconnect()
 ```
 
 ---
 
-## 18. Architecture Diagrams
+## 6. Testing Framework
+
+```
+tests/
+├── ci/                    # CI-run tests
+│   ├── conftest.py        # Shared fixtures, mock LLM
+│   ├── browser/           # Browser-level tests
+│   ├── models/            # LLM provider tests
+│   ├── interactions/      # Click/type/scroll tests
+│   └── security/          # Domain restriction tests
+└── conftest.py            # Root fixtures
+```
+
+```bash
+uv run pytest -vxs tests/ci    # CI tests
+uv run pytest -vxs tests/      # All tests
+```
+
+Key testing pattern — HTTP server for local HTML:
+```python
+def test_navigation(httpserver):
+    httpserver.expect_request("/test").respond_with_data(
+        "<html><body><button>Click me</button></body></html>"
+    )
+    # Agent navigates to httpserver.url_for("/test")
+```
+
+---
+
+## 7. Architecture Diagrams
 
 ### Component Hierarchy
 
@@ -1044,53 +566,53 @@ await mcp.disconnect()
 Agent
   ├─ BrowserSession
   │   ├─ EventBus (bubus)
-  │   │   └─ Watchdogs
+  │   │   └─ Watchdogs (12 services)
   │   │       ├─ DownloadsWatchdog
   │   │       ├─ PopupsWatchdog
   │   │       ├─ SecurityWatchdog
   │   │       ├─ DOMWatchdog
-  │   │       └─ ... (more watchdogs)
+  │   │       ├─ CaptchaWatchdog
+  │   │       └─ CrashWatchdog ...
   │   └─ CDP Client (cdp-use)
-  │       └─ Chrome/Chromium
+  │       └─ Chrome/Chromium (local or cloud)
   ├─ Tools
   │   └─ Registry
-  │       └─ Actions (click, type, etc.)
+  │       └─ Actions: click, type, navigate, scroll, extract, done...
   ├─ MessageManager
-  │   └─ State + Context Building
+  │   └─ System Prompt + Browser State + History
   ├─ DomService
-  │   └─ DOM Processing + Highlighting
+  │   └─ Accessibility Tree → Index Assignment → Text Serialisation
+  ├─ LLM (BaseChatModel)
+  │   └─ 15+ providers via unified protocol
   └─ FileSystem
-      └─ File Operations
+      └─ FileSystemState
 ```
 
 ### Data Flow
 
 ```
-User Task
+User Task (string)
     ↓
 Agent.run()
     ↓
-┌─────────────────┐
-│   Step Loop     │
-└─────────────────┘
-    ↓
-BrowserSession.get_state()
+BrowserSession.get_current_state()
     ↓
 DomService.get_serialized_dom()
+    → "[1] <a>Home</a>  [2] <input> Search  [7] <button>Add to Cart</button>"
     ↓
 MessageManager.build_context()
+    → System Prompt + DOM text + URL + screenshot (if vision) + history
     ↓
-LLM.ainvoke(messages, AgentOutput)
+LLM.ainvoke() → AgentOutput
+    → { thinking: "...", next_goal: "click add to cart", action: [CLICK [7]] }
     ↓
-Parse Actions
+execute_action(CLICK [7])
     ↓
-Execute Actions via Tools
+dispatch_event(ClickElementEvent(node=[7]))
     ↓
-Record Result
+EventBus → DOMWatchdog → CDP call → Chrome executes click
     ↓
-Check done?
-    ├─ Yes → Return AgentHistoryList
-    └─ No → Loop
+Record result → loop
 ```
 
 ### Event Flow
@@ -1102,82 +624,152 @@ dispatch_event(ClickElementEvent)
     ↓
 EventBus.route()
     ↓
-Watchdog.on_ClickElementEvent()
-    ↓
-Browser CDP Call
-    ↓
-Result/State Change
+Watchdog.on_ClickElementEvent() → CDP call → Browser
     ↓
 emit_event(NavigationCompleteEvent)
     ↓
-Other Watchdogs React
+Other watchdogs react (SecurityWatchdog checks domain, etc.)
 ```
 
 ---
 
-## 19. Key Technical Decisions
+## 8. Key Technical Decisions
 
-### Why CDP (Chrome DevTools Protocol)?
+**Why CDP instead of Playwright?**
+- Low-level control over browser internals
+- Direct access to network, DOM, runtime events
+- No test-layer overhead (Playwright's actionability checks add latency)
+- Better for automation than testing
 
-- Low-level control over browser behavior
-- Access to network, DOM, and runtime events
-- No intermediate abstraction layer
-- Direct access to browser internals
-
-### Why cdp-use Wrapper?
-
-- Type-safe CDP interfaces
-- Automatic session management
+**Why `cdp-use` wrapper?**
+- Type-safe CDP interfaces (auto-generated from Chrome's protocol)
+- Managed by browser-use team
 - Async-first design
-- Maintained by browser-use team
 
-### Why bubus Event Bus?
+**Why `bubus` event bus?**
+- Decoupled component architecture — watchdogs don't know about each other
+- Type-safe event handling via Pydantic models
+- Easy to add new watchdogs without touching existing code
+- Testable in isolation
 
-- Decoupled component architecture
-- Type-safe event handling
-- Easy to add new watchdogs
-- Testable event flows
+**Why Pydantic v2?**
+- Runtime validation of LLM outputs
+- JSON Schema generation for tool definitions
+- Modern Python typing (`str | None` vs `Optional[str]`)
 
-### Why Pydantic v2?
+**Why `uv` instead of `pip`?**
+- 10-100x faster dependency resolution
+- Reproducible builds via lockfile
+- Manages Python versions too
 
-- Runtime validation
-- Great TypeScript-like developer experience
-- JSON Schema generation for LLM tools
-- Modern Python typing (str | None instead of Optional)
-
-### Why async/await throughout?
-
-- Non-blocking browser operations
+**Why async/await throughout?**
+- Non-blocking CDP WebSocket communication
 - Concurrent event handling
-- Natural fit for CDP WebSocket communication
-- Python 3.11+ modern async patterns
-
-### Why uv for dependency management?
-
-- Fast dependency resolution
-- Reproducible builds
-- Virtual environment management
-- Modern Python packaging
+- Natural fit for Python 3.11+ patterns
 
 ---
 
-## 20. Conclusion
+## 9. Security & Privacy
 
-Browser-Use represents a robust, production-ready approach to AI-powered browser automation through its DOM-centric architecture and event-driven design. Key strengths:
+```python
+# Sensitive data masking — values never appear in logs
+agent = Agent(
+    task="Login to portal",
+    sensitive_data={
+        "username": "user@company.com",
+        "password": "secret"
+    }
+)
+# Prompt shows: {{username}}, {{password}}
+# Logs show: ●●●●●●●●
 
-1. **DOM-First Design**: Predictable element selection through indexed DOM elements
-2. **Event-Driven Architecture**: Modular watchdog services for extensibility
-3. **Multi-LLM Support**: Unified abstraction over 15+ LLM providers
-4. **CDP Integration**: Low-level browser control without abstraction layers
-5. **Developer Experience**: Type-safe APIs, comprehensive testing, clear documentation
-6. **MCP Integration**: Both server and client modes for ecosystem connectivity
-7. **Production Ready**: Error handling, retries, security features, telemetry
-
-The library is actively maintained with a clear focus on reliability and extensibility. Its modular architecture makes it suitable for both simple automation scripts and complex multi-agent workflows.
-
-For teams looking to implement reliable browser automation with LLM agents, browser-use provides a solid foundation with proven reliability and a thoughtful design that balances power with usability.
+# Domain restriction
+profile = BrowserProfile(
+    allowed_domains=["company.com"],
+    prohibited_domains=["ads.com", "tracker.com"]
+)
+# SecurityWatchdog blocks navigation to prohibited domains
+```
 
 ---
 
-*Generated: 2025-03-05*
-*Template based on: Magnitude Research Dump*
+## 10. Limitations & Known Issues
+
+**Current limitations:**
+- **Chromium only** — CDP not available in Firefox/Safari
+- **Shadow DOM** — complex shadow DOM requires `cross_origin_iframes=True`
+- **Cross-origin iframes** — disabled by default, may miss content
+- **No parallel browsing** — single browser session per Agent instance
+
+**Model requirements (minimum):**
+- Function calling / tool use support
+- Structured JSON output
+- 32k+ context window
+
+**Recommended models:**
+- `ChatBrowserUse()` — purpose-trained, 3-5x faster, SOTA accuracy
+- GPT-4o, Claude Sonnet 4, Gemini 2.5 Pro
+- Vision capability needed if `use_vision=True`
+- 100k+ context for complex multi-step tasks
+
+---
+
+## 11. Performance Optimisations
+
+```python
+# Prompt caching (Anthropic)
+llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+# System prompt and history are automatically cached — reduces cost ~90%
+
+# Vision modes
+agent = Agent(task="...", llm=llm, use_vision='auto')
+# 'auto' — includes screenshot tool, uses only when needed
+# True   — always includes screenshot
+# False  — never uses screenshots, no vision model needed
+
+# Flash mode — faster with simpler models
+agent = Agent(task="...", llm=llm, use_thinking=False)
+# Disables: thinking, evaluation_previous_goal, next_goal fields
+```
+
+---
+
+## 12. Development Workflow
+
+```bash
+# Setup
+uv venv --python 3.11
+source .venv/bin/activate
+uv sync
+
+# Quality
+uv run pyright         # Type checking
+uv run ruff check --fix
+uv run ruff format
+uv run pre-commit run --all-files
+
+# Tests
+uv run pytest -vxs tests/ci
+```
+
+---
+
+## 13. Conclusion
+
+Browser-Use represents the current state-of-the-art for open-source DOM-based web agent frameworks. Its event-driven watchdog architecture is uniquely extensible, the LLM provider abstraction is the broadest in its class (15+ providers), and the CDP-first design gives lower latency than Playwright-wrapped alternatives.
+
+**Key strengths summary:**
+- DOM-first → deterministic element selection, no vision model required
+- 12-watchdog event architecture → modular, testable, extensible
+- 15+ LLM providers via unified BaseChatModel protocol
+- MCP server + client → ecosystem connectivity
+- 89.1% WebVoyager (Steel leaderboard, 2025)
+- ~50k GitHub stars, actively maintained
+
+**WebVoyager score:** 89.1% (Steel leaderboard, single-run, self-reported)  
+**License:** MIT  
+**Language:** Python ≥3.11  
+**Repository:** https://github.com/browser-use/browser-use  
+**Snapshot date:** 2026-03-18  
+
+*Generated: 2026-03-18. Based on: GitHub source code analysis, CLAUDE.md, AGENTS.md, __init__.py, and official documentation.*
