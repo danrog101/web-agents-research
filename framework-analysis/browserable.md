@@ -1,103 +1,161 @@
-# Browserable
+# Browserable Research Report
 
-**Framework name:** Browserable  
+## Executive Summary
+
+Browserable is an **open-source, self-hostable browser automation library** with a simple task-oriented API. Users submit natural language task descriptions; Browserable handles the full browser lifecycle, action execution, and result extraction. It reported **90.4% on WebVoyager**, placing it 4th on the Steel leaderboard. The library integrates with cloud browser providers (Hyperbrowser, Steel) for infrastructure.
+
+---
+
+## 1. Architecture Overview
+
+### Core Philosophy
+
+**Task-runner design:** Browserable is not an agent framework you import into your own code — it is a self-hosted service that exposes an API. You create tasks; it executes them and returns results.
+
+**Remote browser integration:** Rather than managing its own Chrome instances, Browserable integrates with cloud browser providers. This offloads CAPTCHA solving, proxy management, and session persistence to the provider.
+
+### Package Structure
+
+```
+browserable/
+├── server/
+│   ├── src/
+│   │   ├── agent/
+│   │   │   └── BrowserAgent.ts        # Core agent implementation
+│   │   ├── browser/
+│   │   │   ├── HyperbrowserProvider.ts # Hyperbrowser integration
+│   │   │   └── SteelProvider.ts        # Steel integration
+│   │   ├── llm/
+│   │   │   ├── GeminiProvider.ts
+│   │   │   ├── OpenAIProvider.ts
+│   │   │   └── AnthropicProvider.ts
+│   │   ├── api/
+│   │   │   └── TaskRouter.ts           # REST API endpoints
+│   │   └── task/
+│   │       ├── TaskRunner.ts
+│   │       └── TaskQueue.ts
+│   └── package.json
+├── browserable-js/                     # JavaScript SDK
+│   └── src/
+│       └── Browserable.ts
+├── docker-compose.yml                  # Self-hosting config
+└── README.md
+```
+
+---
+
+## 2. Core Components Deep Dive
+
+### 2.1 JavaScript/TypeScript SDK
+
+```typescript
+import { Browserable } from 'browserable-js';
+
+// Initialize SDK with self-hosted or cloud endpoint
+const browserable = new Browserable({
+    apiKey: 'your-api-key',
+    baseURL: 'http://localhost:2001',  // self-hosted
+    // or cloud endpoint
+});
+
+// Create and run a task
+async function runTask() {
+    const createResult = await browserable.createTask({
+        task: 'Find the top trending GitHub repos of the day.',
+        agent: 'BROWSER_AGENT',
+    });
+    
+    const taskId = createResult.data.id;
+    
+    // Poll until complete
+    const result = await browserable.waitForRun(taskId);
+    console.log('Results:', result.data);
+}
+```
+
+### 2.2 Task API Endpoints
+
+```bash
+# Create task
+POST /api/tasks
+{
+    "task": "Search arxiv for latest papers on LLM agents",
+    "agent": "BROWSER_AGENT"
+}
+
+# Get task status
+GET /api/tasks/{taskId}
+
+# Get task result
+GET /api/tasks/{taskId}/result
+```
+
+### 2.3 Self-Hosting Setup
+
+```bash
+# One-command setup
+npx browserable
+
+# Then configure at localhost:2001:
+# 1. Set LLM provider (Gemini / OpenAI / Claude)
+# 2. Set remote browser provider (Hyperbrowser or Steel)
+# 3. Submit tasks via SDK or web UI
+
+# Environment variables
+GEMINI_API_KEY=...
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+HYPERBROWSER_API_KEY=...  # or STEEL_API_KEY=...
+```
+
+### 2.4 Example Tasks
+
+```
+"On amazon.com search for a yoga mat at least 6mm thick, non-slip, eco-friendly, and under $50"
+"On arxiv.org locate the latest paper in 'Nonlinear Sciences - Chaotic Dynamics', summarise the abstract"
+"On coursera.com find a beginner-level 3D printing course lasting 1-3 months from a renowned university"
+```
+
+---
+
+## 3. Architecture Diagram
+
+```
+User/Application
+    ↓
+browserable-js SDK (HTTP)
+    ↓
+Browserable Server (self-hosted, Node.js)
+    ├─ Task Queue
+    ├─ BrowserAgent (LLM reasoning loop)
+    │   ├─ Gemini / OpenAI / Anthropic
+    │   └─ Action parsing + execution
+    └─ Browser Provider
+        ├─ Hyperbrowser (cloud Chromium)
+        └─ Steel (cloud Chromium)
+```
+
+---
+
+## 4. Key Technical Decisions
+
+**Why remote browser providers?**
+Cloud browsers handle CAPTCHA, IP rotation, and anti-bot measures that are expensive to build in-house. Browserable focuses on the AI reasoning layer and delegates infrastructure.
+
+**Why task-runner design instead of a library?**
+Lower barrier to entry — no need to write an agent loop. Submit a task string, get results.
+
+---
+
+## 5. Limitations
+
+- Requires a remote browser provider account (Hyperbrowser or Steel)
+- TypeScript/JavaScript only — no Python SDK
+- Less documentation than browser-use or Stagehand
+- Self-reported 90.4% WebVoyager — test conditions not fully disclosed
+
+**WebVoyager score:** 90.4% (self-reported, Steel leaderboard)  
+**License:** MIT/Apache  
+**Language:** TypeScript  
 **Repository:** https://github.com/browserable/browserable  
-**Snapshot date:** 2026-03-18  
-
----
-
-## Architecture
-
-Browserable is an **open-source, self-hostable browser automation library** designed for AI agents. It exposes a task-oriented API where agents submit natural language instructions, and Browserable handles the full execution loop — browser lifecycle, page interaction, and result extraction.
-
-The system is deployable via `npx browserable` and exposes:
-- A **web admin dashboard** (localhost:2001) for configuring LLM and remote browser API keys.
-- A **JavaScript/TypeScript SDK** (`browserable-js`) for programmatic task submission.
-- A **REST API** for async task management.
-
-Tasks are submitted with a natural language `task` string and an `agent` type (e.g., `BROWSER_AGENT`). Browserable handles planning, navigation, and extraction internally, returning structured results.
-
-The architecture separates browser infrastructure (integrating with remote browser providers like **Hyperbrowser** or **Steel**) from the AI execution layer, making it possible to swap providers.
-
----
-
-## Perception type
-
-**DOM + LLM reasoning.** Browserable processes page content through DOM analysis fed to the configured LLM. No explicit details on accessibility-tree-only vs. full DOM are documented in the public README; the system appears to use a standard HTML/DOM extraction pipeline.
-
----
-
-## LLM compatibility
-
-Provider-agnostic via configurable API keys. Supports:
-- **Gemini** (Google)
-- **OpenAI** (GPT-4o, etc.)
-- **Anthropic** (Claude)
-- Other providers can be configured via compatible endpoints.
-
----
-
-## Action interface
-
-High-level natural language task interface. The user submits a task description; Browserable internally plans and executes actions (navigate, click, type, extract). The SDK exposes:
-- `createTask({ task, agent })` — create and start a task
-- `waitForRun(taskId)` — poll until completion
-- `getTaskStatus(taskId)` — check progress
-
-No fine-grained action control is exposed to the caller in the default API.
-
----
-
-## Dependencies
-
-- Node.js / npm for the `npx` CLI and JavaScript SDK
-- Remote browser provider account (Hyperbrowser or Steel — free tier available)
-- LLM provider API key (Gemini, OpenAI, or Claude)
-- Self-hosted server (Docker or Node environment)
-
----
-
-## Browser control method
-
-**Remote browser via CDP** — Browserable integrates with third-party headless browser providers (Hyperbrowser, Steel) over their CDP or API interfaces. It does not manage its own Chrome instances by default, offloading browser infrastructure to the cloud provider. Local browser support appears limited in the current version.
-
----
-
-## Strengths
-
-- **90.4% reported score on WebVoyager** — highest of any framework in this comparison set (as of snapshot date).
-- **Self-hostable** — full control over deployment, privacy, and data.
-- **Simple API** — task submission is a single function call; no need to write step-by-step logic.
-- **Multi-LLM support** out of the box.
-- **Admin dashboard** for non-technical configuration.
-- **Open source** (MIT/Apache license) with full transparency.
-
----
-
-## Weaknesses
-
-- **Remote browser dependency** — requires signing up for a third-party browser provider (Hyperbrowser or Steel) to get started; local-first operation is not the default.
-- **Limited documentation** — the README covers basic setup but architectural internals are not well documented, making it harder to study or extend.
-- **JavaScript/TypeScript only** for the SDK — Python users have no native SDK.
-- **Early-stage project** — fewer community contributions, less battle-tested than browser-use.
-- **No fine-grained action API** — limited to natural language task descriptions; unsuitable for deterministic step-by-step automation.
-- The 90.4% WebVoyager figure is self-reported and should be independently verified.
-
----
-
-## Typical use cases
-
-- Rapid prototyping of browser automation workflows without infrastructure setup
-- Building lightweight AI agents for data extraction and web research
-- Integration into Node.js/TypeScript backend services
-- Startups needing a deployable browser agent without managing Playwright infrastructure
-
----
-
-## Additional notes for thesis research
-
-**Benchmark claims:** Browserable's 90.4% WebVoyager score is notable but needs scrutiny — it is self-reported, and the exact test conditions (which tasks, which LLM, what timeout) are not detailed in the repo. This is methodologically important for your thesis on AI agent consistency and reproducibility.
-
-**Reproducibility concern:** The reliance on remote browser providers means exact reproducibility requires access to the same provider infrastructure — a limitation worth noting in your methodology chapter.
-
-**Comparison axis:** Browserable occupies a different layer of the stack from browser-use or Stagehand. It is closer to a "managed task runner" than a framework — analogous to the difference between a library and a platform. This distinction is relevant for your framework classification taxonomy.
+**Snapshot date:** 2026-03-18
