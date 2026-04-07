@@ -1,0 +1,53 @@
+# open-interpreter — Setup Guide
+
+## Requirements
+
+- Python 3.14 (or 3.10+)
+- Groq API key (free tier)
+- Windows 10/11
+
+## Installation
+
+```cmd
+pip install open-interpreter
+```
+
+## Configuration
+
+Create a `.env` file in your project directory:
+
+```
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+## Agent Script
+
+Create `agent.py`:
+
+```python
+from interpreter import interpreter
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+interpreter.llm.model = "groq/llama-3.3-70b-versatile"
+interpreter.llm.api_key = os.getenv("GROQ_API_KEY")
+interpreter.auto_run = True
+
+interpreter.chat("Go to https://books.toscrape.com. Find the book called 'Soumission' and note its price and star rating. Then navigate to the Mystery category and find the most expensive book. Report the title, price, and star rating of the most expensive Mystery book.")
+```
+
+## Running
+
+```cmd
+python agent.py
+```
+
+## Notes
+
+- No database required
+- No Docker required
+- No browser window opens — agent writes and executes Python code directly
+- Free Groq API tier is sufficient
+- Very low token consumption compared to visual browser agents
