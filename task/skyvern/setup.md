@@ -1,77 +1,112 @@
-# Skyvern — Consistency Test Analysis
+# Skyvern — Setup Guide
 
-## Framework Info
+## Requirements
 
-| Field | Value |
-|-------|-------|
-| Framework | Skyvern 1.0.29 |
-| LLM | Groq / llama-3.3-70b-versatile |
-| Test site | books.toscrape.com |
-| Total runs | 1 (rate limited) |
+- Python 3.11.9 (Skyvern is NOT compatible with Python 3.14)
+- PostgreSQL 16
+- Node.js v22.20.0
+- Groq API key (high-limit account recommended)
+- Windows 10/11
 
-## Task
+## Step 1 — Install Python 3.11
 
-> Go to https://books.toscrape.com. Find the book called 'Soumission' and note its price and star rating. Then navigate to the Mystery category and find the most expensive book. Report the title, price, and star rating of the most expensive Mystery book.
+Download Python 3.11.9 from python.org and install alongside your existing Python version.
 
-## Expected Results
+```
+Installation path: C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\
+```
 
-| Book | Price | Rating |
-|------|-------|--------|
-| Soumission | £50.10 | ⭐⭐⭐ (Three) |
-| Boar Island (Mystery) | £59.48 | ⭐⭐⭐⭐ (Four) |
+## Step 2 — Install PostgreSQL 16
 
-## Results Summary
+Download from postgresql.org/download/windows. Install to `D:\PostgreSQL` (or preferred path).
 
-| Run | Status | Duration | Soumission | Mystery Book | Correct? |
-|-----|--------|----------|-----------|--------------|---------|
-| 1 | ❌ FAIL | ~8 min | Found | Found (navigated) | Partial |
-| 2 | ⏳ PENDING | — | — | — | — |
-| 3 | ⏳ PENDING | — | — | — | — |
+Set a password for the `postgres` user during installation.
 
-**Success rate: 0/1 completed runs**
+## Step 3 — Install Skyvern
 
-*Runs 2 and 3 pending — awaiting Groq token reset*
+```cmd
+C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\python.exe -m pip install skyvern
+C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\python.exe -m playwright install chromium
+```
 
-## Run Details
+## Step 4 — Create the Database
 
-### Run 1 — FAIL (rate limit)
-- Duration: ~8 minutes
-- Soumission: Found and identified (£50.10, Three stars)
-- Mystery category: Navigated successfully
-- Failure reason: Groq TPM rate limit (12,000 tokens/min) exceeded during step processing
-- Behaviour: Task looped indefinitely — restarted from beginning each time rate limit was hit
-- Notes: Framework functionality confirmed working; failure is due to API constraints
+```cmd
+"D:\PostgreSQL\bin\psql" -U postgres -c "CREATE DATABASE skyvern;"
+```
 
-## Token Consumption
+## Step 5 — Configure .env
 
-Skyvern consumes significantly more tokens than other frameworks because it sends full page screenshots to the LLM at every step.
+Create `C:\skyvern-test\.env`:
 
-| Framework | Tokens per run (approx.) | Approach |
-|-----------|--------------------------|---------|
-| browser-use | ~3,000–5,000 | HTML + DOM |
-| open-interpreter | ~1,000–2,000 | Code execution |
-| **Skyvern** | **~15,000–30,000+** | **Visual screenshots** |
+```
+DATABASE_STRING=postgresql+asyncpg://postgres:<your_password>@localhost:5432/skyvern
+ENABLE_OPENAI_COMPATIBLE=true
+OPENAI_COMPATIBLE_MODEL_NAME=llama-3.3-70b-versatile
+OPENAI_COMPATIBLE_API_KEY=<your_groq_api_key>
+OPENAI_COMPATIBLE_API_BASE=https://api.groq.com/openai/v1
+LLM_KEY=OPENAI_COMPATIBLE
+SECONDARY_LLM_KEY=OPENAI_COMPATIBLE
+```
 
-## Consistency Analysis
+## Step 6 — Apply Timezone Bug Fix
 
-Only one run attempted due to Groq rate limits. Skyvern confirmed it can navigate the target site and locate the required information, but could not complete the full task within the free tier token limits.
+Skyvern 1.0.29 has a bug with timezone-aware datetime objects and PostgreSQL. Fix it:
 
-**Key observations:**
-- Skyvern uses computer vision — sends screenshots to the LLM instead of HTML
-- This approach is more robust for complex UIs but requires significantly more tokens
-- Groq free tier (12,000 TPM / 100,000 TPD) is insufficient for reliable Skyvern operation
-- Framework requires PostgreSQL database and significant setup compared to other agents
+```cmd
+"C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\python.exe" -c "import re; path = r'C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\Lib\site-packages\skyvern\forge\sdk\db\repositories\tasks.py'; f=open(path,'r',encoding='utf-8'); content=f.read(); f.close(); content=re.sub(r'datetime\.now\(timezone\.utc\)', 'datetime.now()', content); f=open(path,'w',encoding='utf-8'); f.write(content); f.close(); print('Done!')"
+```
 
-## Strengths
-- Vision-based approach works on any website regardless of HTML structure
-- Can interact with complex dynamic UIs
-- Built-in workflow builder and UI dashboard
-- Supports parallel task execution
+## Step 7 — Run Alembic Migrations
 
-## Weaknesses
-- Very high token consumption (~10x more than browser-use)
-- Requires PostgreSQL database setup
-- Complex installation with multiple bug fixes required (timezone bug in source code)
-- Groq free tier insufficient — paid API or high-limit account needed
-- Skyvern UI "Discover" mode incompatible with Groq (loops indefinitely)
-- API key expires on every server restart
+```cmd
+cd C:\skyvern-test
+C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\Scripts\alembic.exe upgrade head
+```
+
+## Step 8 — Start the Server
+
+**Terminal 1 — API server:**
+```cmd
+C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\Scripts\skyvern.exe run server
+```
+
+**Terminal 2 — UI (optional, http://localhost:8080):**
+```cmd
+C:\Users\<user>\AppData\Local\Python\pythoncore-3.11-64\Scripts\skyvern.exe run ui
+```
+
+## Step 9 — Generate API Key
+
+Run this every time after restarting the server:
+
+```cmd
+curl -X POST http://localhost:8000/api/v1/internal/auth/repair
+```
+
+Copy the `api_key` value from the response.
+
+## Step 10 — Run a Task
+
+```cmd
+curl -X POST http://localhost:8000/api/v1/tasks ^
+  -H "Content-Type: application/json" ^
+  -H "x-api-key: <api_key>" ^
+  -d "{\"url\":\"https://books.toscrape.com\",\"navigation_goal\":\"Find the book Soumission and note price and star rating. Then go to Mystery category and find most expensive book title price and rating.\"}"
+```
+
+## Cancelling Stuck Runs
+
+If a run gets stuck, cancel it via PostgreSQL:
+
+```cmd
+"D:\PostgreSQL\bin\psql" -U postgres -d skyvern -c "UPDATE workflow_runs SET status='canceled' WHERE status='created';"
+```
+
+## Important Notes
+
+- **Do NOT use the Discover UI** — it automatically uses "Code" mode which loops indefinitely with Groq
+- **Always use the direct API curl** to run tasks
+- **Generate a new API key** before each run (key expires on server restart)
+- **Groq free tier** (12,000 TPM / 100,000 TPD) may be insufficient — use a high-limit account
+- Skyvern sends full page screenshots to the LLM, consuming ~15,000–30,000+ tokens per run
