@@ -1,77 +1,88 @@
 # Skyvern — Consistency Test Analysis
 
-## Framework Info
+## 📝 Task
+Navigate `books.toscrape.com`, find 'Soumission' (price + rating), go to Mystery category, find most expensive book, report results.
 
-| Field | Value |
-|-------|-------|
-| Framework | Skyvern 1.0.29 |
-| LLM | Groq / llama-3.3-70b-versatile |
-| Test site | books.toscrape.com |
-| Total runs | 1 (rate limited) |
+## 🤖 Configuration
+- **Framework**: Skyvern 1.0.30
+- **LLM**: Groq / `meta-llama/llama-4-scout-17b-16e-instruct`
+- **Approach**: Vision-based browser automation — screenshots sent to LLM each step
+- **Note**: Skyvern 2.0 (Code mode) was not tested — requires OpenAI API (paid)
 
-## Task
+---
 
-> Go to https://books.toscrape.com. Find the book called 'Soumission' and note its price and star rating. Then navigate to the Mystery category and find the most expensive book. Report the title, price, and star rating of the most expensive Mystery book.
+## ⏱️ Results Summary
 
-## Expected Results
+| | Run 1 | Run 2 | Run 3 | Run 4 |
+|--|-------|-------|-------|-------|
+| **Terminal** | Same | Same | Same | New |
+| **Duration** | ~4:13 | ~3:49 | ~2:17 | ~3:30 |
+| **Steps** | 14 | 12 | 9 | 11 |
+| **Input Tokens** | 134,689 | 115,141 | 87,701 | 100,083 |
+| **Max Steps** | default | default | 25 | 30 |
+| **Schema** | none | none | basic | detailed |
+| **DB Status** | ❌ failed | ❌ failed | ✅ completed | ❌ failed |
+| **Extracted data** | ❌ empty | ❌ empty | ❌ empty | ❌ empty |
 
-| Book | Price | Rating |
-|------|-------|--------|
-| Soumission | £50.10 | ⭐⭐⭐ (Three) |
-| Boar Island (Mystery) | £59.48 | ⭐⭐⭐⭐ (Four) |
+**Success rate**: 1/4 (25%) — only Run 3 achieved `completed` status  
+**Extracted data success rate**: 0/4 (0%) — no run produced structured output
 
-## Results Summary
+---
 
-| Run | Status | Duration | Soumission | Mystery Book | Correct? |
-|-----|--------|----------|-----------|--------------|---------|
-| 1 | ❌ FAIL | ~8 min | Found | Found (navigated) | Partial |
-| 2 | ⏳ PENDING | — | — | — | — |
-| 3 | ⏳ PENDING | — | — | — | — |
+## ✅ Output Consistency
 
-**Success rate: 0/1 completed runs**
+| Field | Run 1 | Run 2 | Run 3 | Run 4 | Consistent? |
+|-------|-------|-------|-------|-------|-------------|
+| **Soumission price** | visual only | visual only | visual only | visual only | ⚠️ Partial |
+| **Soumission rating** | visual only | visual only | visual only | visual only | ⚠️ Partial |
+| **Most expensive book** | visual only | visual only | visual only | visual only | ⚠️ Partial |
+| **DB extracted_information** | empty | empty | empty | empty | ✅ Consistently empty |
 
-*Runs 2 and 3 pending — awaiting Groq token reset*
+---
 
-## Run Details
+## 🔍 Key Observations
 
-### Run 1 — FAIL (rate limit)
-- Duration: ~8 minutes
-- Soumission: Found and identified (£50.10, Three stars)
-- Mystery category: Navigated successfully
-- Failure reason: Groq TPM rate limit (12,000 tokens/min) exceeded during step processing
-- Behaviour: Task looped indefinitely — restarted from beginning each time rate limit was hit
-- Notes: Framework functionality confirmed working; failure is due to API constraints
+### 1. No persistent memory between steps
+Skyvern 1.0 sends only the **current screenshot + original goal** to the LLM at each step. It does not include the history of previous steps. This caused the agent to repeatedly find Soumission (6+ times in some runs) without "remembering" it had already been found.
 
-## Token Consumption
+### 2. extracted_information_schema not populated
+Even in Run 3 (completed status), the extracted_information field in the database was empty. Skyvern 1.0 with Groq models does not reliably populate structured output schemas. The agent completes the task visually but does not format results into the requested schema.
 
-Skyvern consumes significantly more tokens than other frameworks because it sends full page screenshots to the LLM at every step.
+### 3. Run 3 was the most efficient despite fewest parameters
+Run 3 had the fewest steps (9), fastest completion (~2:17), and was the only run to achieve `completed` status. This suggests that more steps/tokens does not correlate with better results for Skyvern 1.0.
 
-| Framework | Tokens per run (approx.) | Approach |
-|-----------|--------------------------|---------|
-| browser-use | ~3,000–5,000 | HTML + DOM |
-| open-interpreter | ~1,000–2,000 | Code execution |
-| **Skyvern** | **~15,000–30,000+** | **Visual screenshots** |
+### 4. New terminal did not improve results
+Run 4 (new terminal, most detailed goal, most steps) still failed. This suggests the limitation is in the framework itself, not in session state or context.
 
-## Consistency Analysis
+### 5. High token consumption
+Average input tokens per run: ~109,403. Compare to browser-use (~9 min runs) and open-interpreter (~25 seconds). Skyvern sends full page screenshots at every step, making it significantly more token-intensive.
 
-Only one run attempted due to Groq rate limits. Skyvern confirmed it can navigate the target site and locate the required information, but could not complete the full task within the free tier token limits.
+### 6. Skyvern 1.0 vs 2.0
+Only Skyvern 1.0 was tested due to budget constraints. Skyvern 2.0 (Code generation mode) requires OpenAI API and would likely have better memory management and structured output support.
 
-**Key observations:**
-- Skyvern uses computer vision — sends screenshots to the LLM instead of HTML
-- This approach is more robust for complex UIs but requires significantly more tokens
-- Groq free tier (12,000 TPM / 100,000 TPD) is insufficient for reliable Skyvern operation
-- Framework requires PostgreSQL database and significant setup compared to other agents
+---
 
-## Strengths
-- Vision-based approach works on any website regardless of HTML structure
-- Can interact with complex dynamic UIs
-- Built-in workflow builder and UI dashboard
-- Supports parallel task execution
+## 📊 Comparison with Other Frameworks
 
-## Weaknesses
-- Very high token consumption (~10x more than browser-use)
-- Requires PostgreSQL database setup
-- Complex installation with multiple bug fixes required (timezone bug in source code)
-- Groq free tier insufficient — paid API or high-limit account needed
-- Skyvern UI "Discover" mode incompatible with Groq (loops indefinitely)
-- API key expires on every server restart
+| Metric | browser-use | open-interpreter | skyvern 1.0 |
+|--------|-------------|-----------------|-------------|
+| **Approach** | DOM-based | Code generation | Vision (screenshots) |
+| **Avg duration** | ~9 min | ~26 sec | ~3:27 min |
+| **Success rate** | 2/3 (67%) | 3/3 (100%) | 1/4 (25%) |
+| **Structured output** | ⚠️ Partial | ✅ Yes | ❌ No |
+| **Memory between steps** | ✅ Yes | ✅ Yes | ❌ No |
+| **Token efficiency** | Medium | Low | High (expensive) |
+| **Works with Groq** | ✅ Yes | ✅ Yes | ✅ Yes (1.0 only) |
+
+---
+
+## ✅ Conclusion
+
+Skyvern 1.0 demonstrated the **lowest consistency** of all tested frameworks — only 1 out of 4 runs achieved a `completed` status, and none produced structured extracted data. The framework's reactive, stateless architecture (screenshot per step, no history) makes it poorly suited for multi-step data extraction tasks when using Groq free-tier models.
+
+**Verdict**: ❌ Not consistent for this task type. Better suited for single-page form-filling tasks where memory between steps is less critical.
+
+**Recommended for**: Simple, single-page automation tasks (form filling, button clicking).  
+**Not recommended for**: Multi-step data extraction requiring memory across steps.
+
+**Important caveat**: Results may differ significantly with Skyvern 2.0 + OpenAI GPT-4o, which was not tested due to budget constraints.
