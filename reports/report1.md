@@ -168,12 +168,12 @@ browser-use Run 3 failed due to Groq's 500k tokens/day limit being exhausted aft
 
 ## 6. Budget Constraints
 
-The following frameworks could not be tested due to requiring paid API access:
+The following frameworks could not be tested due to requiring paid API access but will be tested soon:
 - stagehand, webvoyager, nanobrowser — require OpenAI API (~$5 minimum deposit)
 - magnitude — requires Anthropic API
 - browserable — requires Steel or Hyperbrowser (paid remote browser provider)
 
-**Request**: If possible, a small budget (~$5–10 OpenAI credits) would allow testing of stagehand, webvoyager, and nanobrowser, providing a more complete comparison.
+
 
 ---
 
